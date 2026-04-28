@@ -34,10 +34,10 @@
 
 Since this is a specialized tool, you can install it manually:
 
-1. Clone this repository: `git clone https://github.com/your-username/x-purge.git`
+1. Clone this repository: `https://github.com/salimkayabasi/x-purge-chrome-ext`
 2. Run the build process:
    ```bash
-   npm install
+   npm ci
    npm run build
    ```
 3. Open Chrome and navigate to `chrome://extensions/`.
