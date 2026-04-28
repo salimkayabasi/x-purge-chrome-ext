@@ -3,6 +3,8 @@
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
 [![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](package.json)
 
+![X-Purge](./assets/logo.webp)
+
 **X-Purge** is a powerful Chrome extension designed to help you reclaim your privacy on X (formerly Twitter). It provides automated post deletion, allowing you to easily clear your timeline in bulk and protect your digital footprint.
 
 ---

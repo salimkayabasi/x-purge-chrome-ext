@@ -9,6 +9,7 @@
   },
   "scripts": {
     "test": "jest --coverage",
+    "generate-icons": "mkdir -p src/icons && sips -Z 16 assets/logo.png --out src/icons/icon16.png && sips -Z 32 assets/logo.png --out src/icons/icon32.png && sips -Z 48 assets/logo.png --out src/icons/icon48.png && sips -Z 128 assets/logo.png --out src/icons/icon128.png",
     "minify": "esbuild dist/*.js dist/*.css --minify --allow-overwrite --outdir=dist && html-minifier-terser --collapse-whitespace --remove-comments dist/popup.html -o dist/popup.html",
     "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/ && npm run minify"
   },
