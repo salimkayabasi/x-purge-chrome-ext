@@ -1,0 +1,25 @@
+{
+  "name": "x-purge",
+  "version": "1.0.0",
+  "description": "Automated post deletion for X (Twitter). Easily reclaim your privacy by clearing your timeline in bulk.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "jest --coverage",
+    "minify": "esbuild dist/*.js dist/*.css --minify --allow-overwrite --outdir=dist && html-minifier-terser --collapse-whitespace --remove-comments dist/popup.html -o dist/popup.html",
+    "build": "rm -rf dist && mkdir -p dist && cp -r src/* dist/ && npm run minify"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "html-minifier-terser": "^7.2.0",
+    "jest": "^30.3.0",
+    "jest-environment-jsdom": "^30.3.0"
+  }
+}

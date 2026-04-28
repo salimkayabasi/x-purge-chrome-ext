@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "X-Purge",
+  "version": "1.0",
+  "description": "Automated post deletion for X (Twitter). Easily reclaim your privacy by clearing your timeline in bulk.",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "*://*.x.com/*",
+    "*://*.twitter.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

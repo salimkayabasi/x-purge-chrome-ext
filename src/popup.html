@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+  <title>X-Deleter</title>
+</head>
+<body>
+  <div class="container">
+    <h2>X-Deleter</h2>
+    <div class="form-group">
+      <label for="count">Tweets to Delete/Undo:</label>
+      <input type="number" id="count" value="10" min="1">
+    </div>
+    <div class="form-group" style="display: flex; align-items: center; justify-content: flex-start;">
+      <input type="checkbox" id="forever" style="width: auto; margin-right: 6px;">
+      <label for="forever" style="margin-bottom: 0; cursor: pointer;">Forever (Delete All)</label>
+    </div>
+    <div class="form-group">
+      <label for="delay">Delay (ms):</label>
+      <input type="number" id="delay" value="2000" min="500" step="500">
+    </div>
+    <div class="form-group">
+      <label>Include Options:</label>
+      <div style="display: flex; align-items: center; margin-top: 4px;">
+        <input type="checkbox" id="removeReposts" checked style="width: auto; margin-right: 6px;">
+        <label for="removeReposts" style="margin-bottom: 0; cursor: pointer;">Undo Reposts</label>
+      </div>
+      <div style="display: flex; align-items: center; margin-top: 4px;">
+        <input type="checkbox" id="removeLikes" checked style="width: auto; margin-right: 6px;">
+        <label for="removeLikes" style="margin-bottom: 0; cursor: pointer;">Remove Likes</label>
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="direction">Direction:</label>
+      <select id="direction">
+        <option value="latest">Latest First</option>
+        <option value="oldest">Oldest First (Scroll)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="mode">Mode:</label>
+      <select id="mode">
+        <option value="background">Background Tab</option>
+        <option value="foreground" selected>Foreground Tab</option>
+      </select>
+    </div>
+    <button id="startBtn">Start Deletion</button>
+    <div id="status"></div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
