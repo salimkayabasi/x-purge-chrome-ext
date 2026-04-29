@@ -46,6 +46,16 @@ beforeEach(() => {
     global.chrome = {
         runtime: {
             sendMessage: jest.fn(),
+        },
+        tabs: {
+            query: jest.fn(),
+        },
+        storage: {
+            local: {
+                get: jest.fn((keys, cb) => cb({})),
+                set: jest.fn(),
+                remove: jest.fn(),
+            }
         }
     };
 });
@@ -249,6 +259,8 @@ test("clicking startDislikeBtn handles error response", () => {
     expect(document.getElementById('startDislikeBtn').disabled).toBe(false);
 });
 
-
-
+test("handles empty tab query", () => {
+    global.chrome.tabs.query.mockImplementation((info, callback) => callback([]));
+    require("../src/popup.js");
+});
 

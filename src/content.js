@@ -1,4 +1,4 @@
-let isProcessRunning = false;
+window.isXDeleterRunning = false;
 let myTabId = null;
 
 if (typeof window.xDeleterInjected === 'undefined') {
@@ -29,9 +29,9 @@ if (typeof window.xDeleterInjected === 'undefined') {
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === "EXECUTE") {
-            const payload = { ...message.payload, masterTabId: myTabId };
-            chrome.storage.local.set({ x_deleter_process: { ...payload, running: true, processedCount: 0 } }, () => {
-                startProcess(payload);
+            const payload = { ...message.payload, masterTabId: myTabId, running: true, processedCount: 0 };
+            chrome.storage.local.set({ x_deleter_process: payload }, () => {
+                syncWithStorage(payload);
             });
         }
     });
@@ -51,7 +51,7 @@ function syncWithStorage(state) {
     injectOverlay(title, total, state.processedCount);
 
     // If this tab is the master, and not already running, start/resume it
-    if (state.masterTabId === myTabId && !isProcessRunning) {
+    if (state.masterTabId === myTabId && !window.isXDeleterRunning) {
         startProcess(state);
     }
 }
@@ -73,13 +73,13 @@ function startProcess(p) {
 
 function clearState() {
     chrome.storage.local.remove(['x_deleter_process']);
-    isProcessRunning = false;
+    window.isXDeleterRunning = false;
     chrome.runtime.sendMessage({ action: "STOP_TASK" });
 }
 
 async function startPurgeProcess(count, direction, forever, delay, removeReposts, removeLikes, initialProcessedCount, initialReloadedCount) {
-    if (isProcessRunning) return;
-    isProcessRunning = true;
+    if (window.isXDeleterRunning) return;
+    window.isXDeleterRunning = true;
     let processedCount = initialProcessedCount || 0;
     let reloadedCount = initialReloadedCount || 0;
     let fallbackScrolls = 0;
@@ -111,7 +111,7 @@ async function startPurgeProcess(count, direction, forever, delay, removeReposts
     await new Promise(r => setTimeout(r, 1000));
 
     while (forever || processedCount < count) {
-        if (!isProcessRunning) break;
+        if (!window.isXDeleterRunning) break;
 
         const cells = Array.from(document.querySelectorAll('[data-testid="cellInnerDiv"]')).filter(cell => {
             return cell.querySelector('[data-testid="caret"]') || 
@@ -120,7 +120,7 @@ async function startPurgeProcess(count, direction, forever, delay, removeReposts
         });
 
         if (cells.length === 0) {
-            if (fallbackScrolls > 10) {
+            if (fallbackScrolls > 50) {
                 if (reloadedCount < 1) {
                     reloadedCount++;
                     saveState();
@@ -213,8 +213,8 @@ async function startPurgeProcess(count, direction, forever, delay, removeReposts
 }
 
 async function startUnfollowProcess(count, forever, delay, includeBlock, initialProcessedCount, initialReloadedCount) {
-    if (isProcessRunning) return;
-    isProcessRunning = true;
+    if (window.isXDeleterRunning) return;
+    window.isXDeleterRunning = true;
     let processedCount = initialProcessedCount || 0;
     let reloadedCount = initialReloadedCount || 0;
     let fallbackScrolls = 0;
@@ -249,7 +249,7 @@ async function startUnfollowProcess(count, forever, delay, includeBlock, initial
     await new Promise(r => setTimeout(r, 1000));
 
     while (forever || processedCount < count) {
-        if (!isProcessRunning) break;
+        if (!window.isXDeleterRunning) break;
 
         const users = Array.from(document.querySelectorAll('[data-testid="UserCell"]')).filter(user => {
             return !user.hasAttribute('data-x-processed') && 
@@ -257,7 +257,7 @@ async function startUnfollowProcess(count, forever, delay, includeBlock, initial
         });
 
         if (users.length === 0) {
-            if (fallbackScrolls > 10) {
+            if (fallbackScrolls > 50) {
                 updateOverlay(`Completed! Processed: ${processedCount}/${displayTotal}`);
                 clearState();
                 break;
@@ -328,8 +328,8 @@ async function startUnfollowProcess(count, forever, delay, includeBlock, initial
 }
 
 async function startDislikeProcess(count, forever, delay, initialProcessedCount, initialReloadedCount) {
-    if (isProcessRunning) return;
-    isProcessRunning = true;
+    if (window.isXDeleterRunning) return;
+    window.isXDeleterRunning = true;
     let processedCount = initialProcessedCount || 0;
     let reloadedCount = initialReloadedCount || 0;
     let fallbackScrolls = 0;
@@ -364,14 +364,14 @@ async function startDislikeProcess(count, forever, delay, initialProcessedCount,
     await new Promise(r => setTimeout(r, 1000));
 
     while (forever || processedCount < count) {
-        if (!isProcessRunning) break;
+        if (!window.isXDeleterRunning) break;
 
         const cells = Array.from(document.querySelectorAll('[data-testid="cellInnerDiv"]')).filter(cell => {
             return cell.querySelector('[data-testid="unlike"]');
         });
 
         if (cells.length === 0) {
-            if (fallbackScrolls > 10) {
+            if (fallbackScrolls > 50) {
                 if (reloadedCount < 1) {
                     reloadedCount++;
                     saveState();
@@ -420,8 +420,8 @@ async function startDislikeProcess(count, forever, delay, initialProcessedCount,
 }
 
 async function startUnbookmarkProcess(count, forever, delay, initialProcessedCount, initialReloadedCount) {
-    if (isProcessRunning) return;
-    isProcessRunning = true;
+    if (window.isXDeleterRunning) return;
+    window.isXDeleterRunning = true;
     let processedCount = initialProcessedCount || 0;
     let reloadedCount = initialReloadedCount || 0;
     let fallbackScrolls = 0;
@@ -447,7 +447,7 @@ async function startUnbookmarkProcess(count, forever, delay, initialProcessedCou
     await new Promise(r => setTimeout(r, 1000));
 
     while (forever || processedCount < count) {
-        if (!isProcessRunning) break;
+        if (!window.isXDeleterRunning) break;
 
         const cells = Array.from(document.querySelectorAll('[data-testid="cellInnerDiv"]')).filter(cell => {
             return cell.querySelector('[data-testid="removeBookmark"]') || 
@@ -456,7 +456,7 @@ async function startUnbookmarkProcess(count, forever, delay, initialProcessedCou
         });
 
         if (cells.length === 0) {
-            if (fallbackScrolls > 10) {
+            if (fallbackScrolls > 50) {
                 if (reloadedCount < 1) {
                     reloadedCount++;
                     saveState();

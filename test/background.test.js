@@ -7,10 +7,16 @@ beforeEach(() => {
         runtime: {
             onMessage: {
                 addListener: jest.fn(),
+            },
+            onInstalled: {
+                addListener: jest.fn(),
             }
         },
         tabs: {
             onUpdated: {
+                addListener: jest.fn(),
+            },
+            onRemoved: {
                 addListener: jest.fn(),
             },
             query: jest.fn(),
@@ -19,6 +25,13 @@ beforeEach(() => {
         },
         scripting: {
             executeScript: jest.fn(),
+        },
+        storage: {
+            local: {
+                get: jest.fn(),
+                set: jest.fn(),
+                remove: jest.fn(),
+            }
         }
     };
 });
@@ -137,3 +150,39 @@ test("handles START_UNBOOKMARK", () => {
     expect(chrome.scripting.executeScript).toHaveBeenCalled();
     expect(sendResponse).toHaveBeenCalledWith({ success: true });
 });
+
+test("handles GET_TAB_ID", () => {
+    require("../src/background.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    const sendResponse = jest.fn();
+    onMessage({ action: "GET_TAB_ID" }, { tab: { id: 101 } }, sendResponse);
+    expect(sendResponse).toHaveBeenCalledWith({ tabId: 101 });
+});
+
+test("handles START_PURGE when task already running", () => {
+    require("../src/background.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    
+    // Set up active task
+    chrome.tabs.query.mockImplementation((queryInfo, callback) => callback([{ id: 101, url: "https://x.com/home" }]));
+    onMessage({ action: "START_PURGE", payload: { mode: "foreground" } }, {}, jest.fn());
+    
+    // Try to start another
+    const sendResponse = jest.fn();
+    onMessage({ action: "START_PURGE", payload: { mode: "foreground" } }, {}, sendResponse);
+    expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
+});
+
+test("handles tabs.onRemoved with active task", () => {
+    require("../src/background.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    const onRemoved = chrome.tabs.onRemoved.addListener.mock.calls[0][0];
+    
+    // Set up active task
+    chrome.tabs.query.mockImplementation((queryInfo, callback) => callback([{ id: 101, url: "https://x.com/home" }]));
+    onMessage({ action: "START_PURGE", payload: { mode: "foreground" } }, {}, jest.fn());
+    
+    onRemoved(101);
+    expect(chrome.storage.local.remove).toHaveBeenCalledWith(['x_deleter_process']);
+});
+

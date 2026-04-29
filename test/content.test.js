@@ -1,23 +1,37 @@
-let originalSetTimeout;
+const originalSetTimeout = global.setTimeout;
 let mockObserverCb = null;
 
 beforeEach(() => {
     jest.resetModules();
     delete window.xDeleterInjected;
+    window.isXDeleterRunning = false;
     mockObserverCb = null;
     document.body.innerHTML = '';
-    originalSetTimeout = global.setTimeout;
 
     global.chrome = {
         runtime: {
             onMessage: { addListener: jest.fn() },
-            sendMessage: jest.fn(),
+            sendMessage: jest.fn((msg, cb) => { 
+                if (cb) cb({ tabId: 1 }); 
+            }),
         },
         storage: {
             local: {
-                get: jest.fn((keys, cb) => { if (cb) originalSetTimeout(() => cb({}), 0); }),
-                set: jest.fn(),
+                get: jest.fn((keys, cb) => { 
+                    if (cb) originalSetTimeout(() => cb({}), 0); 
+                }),
+                set: jest.fn((data, cb) => { 
+                    if (cb) originalSetTimeout(() => cb(), 0); 
+                    // Automatically trigger onChanged if it's the process key
+                    if (data.x_deleter_process && global.chrome.storage.onChanged.addListener.mock.calls[0]) {
+                        const listener = global.chrome.storage.onChanged.addListener.mock.calls[0][0];
+                        originalSetTimeout(() => listener({ x_deleter_process: { newValue: data.x_deleter_process } }, 'local'), 0);
+                    }
+                }),
                 remove: jest.fn((keys, cb) => { if (cb) originalSetTimeout(() => cb(), 0); }),
+            },
+            onChanged: {
+                addListener: jest.fn(),
             }
         }
     };
@@ -29,7 +43,10 @@ beforeEach(() => {
     };
 
     global.setTimeout = (cb, ms) => {
-        if (typeof cb === 'function') return originalSetTimeout(cb, 0);
+        if (typeof cb === 'function') {
+            const delay = (ms === 5000) ? 5000 : 1;
+            return originalSetTimeout(cb, delay);
+        }
     };
     
     window.scrollBy = jest.fn();
@@ -54,7 +71,7 @@ afterEach(() => {
 
 test("content.js initializes and checks storage", (done) => {
     chrome.storage.local.get.mockImplementation((keys, callback) => {
-        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_PURGE", count: 10, processedCount: 0 } }), 0);
+        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_PURGE", count: 10, processedCount: 0, masterTabId: 1 } }), 0);
     });
     require("../src/content.js");
     originalSetTimeout(() => {
@@ -118,7 +135,7 @@ test("purge process full flow with all action types", (done) => {
     originalSetTimeout(() => {
         expect(document.getElementById('cellInnerDiv')).toBeNull();
         done();
-    }, 300);
+    }, 1000);
 });
 
 test("unfollow process and block flow", (done) => {
@@ -154,7 +171,7 @@ test("unfollow process and block flow", (done) => {
     originalSetTimeout(() => {
         expect(userCell.hasAttribute('data-x-processed')).toBe(true);
         done();
-    }, 200);
+    }, 1000);
 });
 
 test("waitForElement and MutationObserver coverage", (done) => {
@@ -204,7 +221,7 @@ test("overlay UI and stop functionality", (done) => {
 
 test("fallback exhaustion and completion state", (done) => {
     chrome.storage.local.get.mockImplementation((keys, callback) => {
-        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_PURGE", count: 10, processedCount: 0, reloadedCount: 1 } }), 0);
+        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_PURGE", count: 10, processedCount: 0, reloadedCount: 1, masterTabId: 1 } }), 0);
     });
     require("../src/content.js");
     const profileLink = document.createElement('a');
@@ -219,9 +236,7 @@ test("fallback exhaustion and completion state", (done) => {
 });
 
 test("navigation and error states", (done) => {
-    require("../src/content.js");
-    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
-    
+    document.body.innerHTML = '';
     // No profile link -> Fail
     onMessage({ action: "EXECUTE", payload: { type: "START_PURGE", count: 1, delay: 0 } }, {}, () => {});
     
@@ -261,7 +276,7 @@ test("simple purge to completion", (done) => {
     originalSetTimeout(() => {
         expect(document.getElementById('x-deleter-text').innerText).toContain("Completed");
         done();
-    }, 200);
+    }, 1000);
 });
 
 test("simple unfollow to completion", (done) => {
@@ -286,7 +301,7 @@ test("simple unfollow to completion", (done) => {
     originalSetTimeout(() => {
         expect(document.getElementById('x-deleter-text').innerText).toContain("Completed");
         done();
-    }, 200);
+    }, 1000);
 });
 
 test("purge process oldest direction", (done) => {
@@ -300,7 +315,7 @@ test("purge process oldest direction", (done) => {
     originalSetTimeout(() => {
         expect(window.scrollBy).toHaveBeenCalled();
         done();
-    }, 200);
+    }, 1000);
 });
 
 test("purge process forever loop", (done) => {
@@ -314,7 +329,7 @@ test("purge process forever loop", (done) => {
     originalSetTimeout(() => {
         expect(window.scrollBy).toHaveBeenCalled();
         done();
-    }, 200);
+    }, 1000);
 });
 
 test("dislike process to completion", (done) => {
@@ -339,7 +354,7 @@ test("dislike process to completion", (done) => {
     originalSetTimeout(() => {
         expect(document.getElementById('x-deleter-text').innerText).toContain("Completed");
         done();
-    }, 200);
+    }, 1000);
 });
 
 test("dislike process navigation branch", (done) => {
@@ -361,7 +376,7 @@ test("dislike process navigation branch", (done) => {
 
 test("dislike process fallback and reload", (done) => {
     chrome.storage.local.get.mockImplementation((keys, callback) => {
-        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_DISLIKE", count: 10, processedCount: 0, reloadedCount: 0 } }), 0);
+        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_DISLIKE", count: 10, processedCount: 0, reloadedCount: 0, masterTabId: 1 } }), 0);
     });
     require("../src/content.js");
     const profileLink = document.createElement('a');
@@ -374,7 +389,7 @@ test("dislike process fallback and reload", (done) => {
     originalSetTimeout(() => {
         expect(window.scrollBy).toHaveBeenCalled();
         done();
-    }, 200);
+    }, 1000);
 });
 test("unbookmark process to completion", (done) => {
     require("../src/content.js");
@@ -396,7 +411,7 @@ test("unbookmark process to completion", (done) => {
     originalSetTimeout(() => {
         expect(document.getElementById('x-deleter-text').innerText).toContain("Completed");
         done();
-    }, 200);
+    }, 1000);
 });
 
 test("unbookmark process navigation branch", (done) => {
@@ -414,7 +429,7 @@ test("unbookmark process navigation branch", (done) => {
 
 test("unbookmark process fallback and reload", (done) => {
     chrome.storage.local.get.mockImplementation((keys, callback) => {
-        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_UNBOOKMARK", count: 10, processedCount: 0, reloadedCount: 0 } }), 0);
+        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_UNBOOKMARK", count: 10, processedCount: 0, reloadedCount: 0, masterTabId: 1 } }), 0);
     });
     require("../src/content.js");
     window.history.pushState({}, '', '/i/bookmarks');
@@ -423,20 +438,25 @@ test("unbookmark process fallback and reload", (done) => {
     originalSetTimeout(() => {
         expect(window.scrollBy).toHaveBeenCalled();
         done();
-    }, 200);
+    }, 1000);
 });
 
 test("unbookmark process exhaustion after reload", (done) => {
     chrome.storage.local.get.mockImplementation((keys, callback) => {
-        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_UNBOOKMARK", count: 10, processedCount: 5, reloadedCount: 1 } }), 0);
+        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_UNBOOKMARK", count: 10, processedCount: 5, reloadedCount: 1, masterTabId: 1 } }), 0);
     });
+    const cell = document.createElement('div');
+    cell.setAttribute('data-testid', 'cellInnerDiv');
+    document.body.appendChild(cell);
+
     require("../src/content.js");
+
     window.history.pushState({}, '', '/i/bookmarks');
 
     originalSetTimeout(() => {
         expect(document.getElementById('x-deleter-text').innerText).toContain("Completed");
         done();
-    }, 200);
+    }, 1000);
 });
 
 test("unbookmark process no action branch", (done) => {
@@ -453,7 +473,7 @@ test("unbookmark process no action branch", (done) => {
     originalSetTimeout(() => {
         expect(window.scrollBy).toHaveBeenCalled();
         done();
-    }, 200);
+    }, 500);
 });
 
 
