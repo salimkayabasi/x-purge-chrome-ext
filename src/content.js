@@ -5,31 +5,37 @@ if (typeof window.xDeleterInjected === 'undefined') {
     chrome.storage.local.get(['x_deleter_process'], (result) => {
         if (result.x_deleter_process && result.x_deleter_process.running) {
             const p = result.x_deleter_process;
-            startProcess(
-                p.count,
-                p.direction,
-                p.forever,
-                p.delay,
-                p.removeReposts,
-                p.removeLikes,
-                p.deletedCount,
-                p.reloadedCount || 0
-            );
+            if (p.type === "START_UNFOLLOW") {
+                startUnfollowProcess(p.count, p.forever, p.delay, p.includeBlock, p.processedCount, p.reloadedCount || 0);
+            } else {
+                startPurgeProcess(
+                    p.count, p.direction, p.forever, p.delay, p.removeReposts, p.removeLikes,
+                    p.processedCount, p.reloadedCount || 0
+                );
+            }
         }
     });
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === "EXECUTE") {
-            // Clear any old state before starting fresh
             chrome.storage.local.remove(['x_deleter_process'], () => {
-                startProcess(
-                    message.payload.count,
-                    message.payload.direction,
-                    message.payload.forever,
-                    message.payload.delay,
-                    message.payload.removeReposts,
-                    message.payload.removeLikes
-                );
+                if (message.payload.type === "START_UNFOLLOW") {
+                    startUnfollowProcess(
+                        message.payload.count,
+                        message.payload.forever,
+                        message.payload.delay,
+                        message.payload.includeBlock
+                    );
+                } else {
+                    startPurgeProcess(
+                        message.payload.count,
+                        message.payload.direction,
+                        message.payload.forever,
+                        message.payload.delay,
+                        message.payload.removeReposts,
+                        message.payload.removeLikes
+                    );
+                }
             });
         }
     });
@@ -40,61 +46,52 @@ let isProcessRunning = false;
 function clearState() {
     chrome.storage.local.remove(['x_deleter_process']);
     isProcessRunning = false;
-    chrome.runtime.sendMessage({ action: "STOP_DELETION" });
+    chrome.runtime.sendMessage({ action: "STOP_TASK" });
 }
 
-async function startProcess(count, direction, forever, delay, removeReposts, removeLikes, initialDeletedCount, initialReloadedCount) {
+async function startPurgeProcess(count, direction, forever, delay, removeReposts, removeLikes, initialProcessedCount, initialReloadedCount) {
     if (isProcessRunning) return;
     isProcessRunning = true;
-    initialDeletedCount = initialDeletedCount || 0;
+    initialProcessedCount = initialProcessedCount || 0;
     initialReloadedCount = initialReloadedCount || 0;
 
     const displayTotal = forever ? "∞" : count;
-    injectOverlay(displayTotal, initialDeletedCount);
+    injectOverlay("Purging Tweets", displayTotal, initialProcessedCount);
 
-    let deletedCount = initialDeletedCount;
+    let processedCount = initialProcessedCount;
     let fallbackScrolls = 0;
     let reloadedCount = initialReloadedCount;
 
-    // Helper to persist current state
     const saveState = () => {
         chrome.storage.local.set({
             x_deleter_process: {
-                running: true,
+                running: true, type: "START_PURGE",
                 count, direction, forever, delay, removeReposts, removeLikes,
-                deletedCount,
-                reloadedCount
+                processedCount, reloadedCount
             }
         });
     };
 
     saveState();
 
-    // Wait for the React app to render the sidebar profile link
     const profileLink = await waitForElement('a[data-testid="AppTabBar_Profile_Link"]', 10000);
-
     if (!profileLink) {
         updateOverlay("Failed to find Profile Link. Are you logged in?");
         clearState();
         return;
     }
 
-    // If we're not already on the profile page, click to navigate
     const profilePath = new URL(profileLink.href).pathname;
     if (window.location.pathname !== profilePath) {
         profileLink.click();
-        // Wait for the timeline to load and show tweets
         await waitForElement('[data-testid="cellInnerDiv"]', 10000);
     }
 
-    // Extra small buffer to ensure X's virtualized list has fully settled in the DOM
     await new Promise(r => setTimeout(r, 1000));
 
-    // Deletion Loop
-    while (forever || deletedCount < count) {
+    while (forever || processedCount < count) {
         if (!isProcessRunning) break;
 
-        // Find all potential tweet/repost cells that have actionable buttons
         const cells = Array.from(document.querySelectorAll('[data-testid="cellInnerDiv"]')).filter(cell => {
             return cell.querySelector('[data-testid="caret"]') || 
                    cell.querySelector('[data-testid="unretweet"]') ||
@@ -106,12 +103,12 @@ async function startProcess(count, direction, forever, delay, removeReposts, rem
                 if (reloadedCount < 1) {
                     reloadedCount++;
                     saveState();
-                    updateOverlay("No tweets found. Reloading to be sure...");
+                    updateOverlay("No tweets found. Reloading...");
                     await new Promise(r => setTimeout(r, 1500));
                     location.reload();
-                    return; // Stop current execution as page is reloading
+                    return;
                 }
-                updateOverlay(`No more tweets found. Processed: ${deletedCount}/${displayTotal}`);
+                updateOverlay(`Completed! Processed: ${processedCount}/${displayTotal}`);
                 clearState();
                 break;
             }
@@ -122,94 +119,199 @@ async function startProcess(count, direction, forever, delay, removeReposts, rem
         }
 
         fallbackScrolls = 0;
-
-        // Grab the appropriate target cell
         let tweetContainer = direction === "oldest" ? cells[cells.length - 1] : cells[0];
-        let targetCaret = tweetContainer.querySelector('[data-testid="caret"]');
         let actionTaken = false;
 
-        // 1. FAST-TRACK: Try quick Unlike first
         let unlikeBtn = tweetContainer.querySelector('[data-testid="unlike"]');
         if (removeLikes && unlikeBtn) {
             unlikeBtn.click();
             actionTaken = true;
         }
 
-        // 2. FAST-TRACK: Try quick Repost Undo if we didn't just unlike
         if (!actionTaken && removeReposts) {
             let unretweetBtn = tweetContainer.querySelector('[data-testid="unretweet"]');
             if (unretweetBtn) {
                 unretweetBtn.click();
-
-                // Wait for dropdown menu to appear and find "Undo Repost" / "Repost'u Geri Al"
                 let undoBtn = await waitForElement('[data-testid="unretweetConfirm"]', 1500);
-                
                 if (!undoBtn) {
                     const dropMenuItems = document.querySelectorAll('[role="menuitem"], [data-testid="Dropdown"]');
-                    undoBtn = Array.from(dropMenuItems).find(el => 
-                        /undo repost|repost'u geri al|geri al/i.test(el.textContent)
-                    );
+                    undoBtn = Array.from(dropMenuItems).find(el => /undo repost|repost'u geri al|geri al/i.test(el.textContent));
                 }
-
                 if (undoBtn) {
                     undoBtn.click();
                     actionTaken = true;
                 } else {
-                    // Failed to find confirm button, close menu
                     document.body.click();
                     await new Promise(r => setTimeout(r, 500));
                 }
             }
         }
 
-        // 3. FALLBACK: Open "More" (caret) menu and try to Delete if it's our own text post
-        if (!actionTaken && targetCaret) {
-            targetCaret.click();
-
-            // Wait for dropdown menu to appear
-            await new Promise(r => setTimeout(r, 700));
-
-            // Find the 'Delete' option in the menu
-            const menuItems = document.querySelectorAll('[role="menuitem"]');
-            let deleteBtn = Array.from(menuItems).find(el => el.textContent.includes('Delete'));
-
-            if (deleteBtn) {
-                deleteBtn.click();
-
-                // Wait for the confirmation dialog
+        if (!actionTaken) {
+            let targetCaret = tweetContainer.querySelector('[data-testid="caret"]');
+            if (targetCaret) {
+                targetCaret.click();
                 await new Promise(r => setTimeout(r, 700));
-
-                const confirmBtn = document.querySelector('[data-testid="confirmationSheetConfirm"]');
-                if (confirmBtn) {
-                    confirmBtn.click();
-                    actionTaken = true;
+                const menuItems = document.querySelectorAll('[role="menuitem"]');
+                let deleteBtn = Array.from(menuItems).find(el => el.textContent.includes('Delete'));
+                if (deleteBtn) {
+                    deleteBtn.click();
+                    await new Promise(r => setTimeout(r, 700));
+                    const confirmBtn = document.querySelector('[data-testid="confirmationSheetConfirm"]');
+                    if (confirmBtn) {
+                        confirmBtn.click();
+                        actionTaken = true;
+                    } else {
+                        document.body.click();
+                    }
                 } else {
-                    document.body.click(); // close sheet if stuck
+                    document.body.click();
+                    await new Promise(r => setTimeout(r, 400));
                 }
-            } else {
-                // No delete button. Close the menu.
-                document.body.click();
-                await new Promise(r => setTimeout(r, 400));
             }
         }
 
         if (actionTaken) {
-            deletedCount++;
-            saveState(); // Update count in storage
-            updateOverlayCount(deletedCount, displayTotal);
+            processedCount++;
+            saveState();
+            updateOverlayCount(processedCount, displayTotal);
         } else {
-            // Nothing worked on this tweet. Skip it by scrolling out of view.
             window.scrollBy(0, 300);
             await new Promise(r => setTimeout(r, 1000));
-            continue; // Skip normal delay, move onto next immediately
+            continue;
         }
 
-        // Wait for X to confirm deletion/undo/unlike and remove the DOM node with the parametrized delay
         await new Promise(r => setTimeout(r, delay));
     }
 
-    if (forever || deletedCount >= count) {
-        updateOverlay(`Completed! Processed: ${deletedCount}/${displayTotal}`);
+    if (forever || processedCount >= count) {
+        updateOverlay(`Completed! Processed: ${processedCount}/${displayTotal}`);
+        clearState();
+    }
+}
+
+async function startUnfollowProcess(count, forever, delay, includeBlock, initialProcessedCount, initialReloadedCount) {
+    if (isProcessRunning) return;
+    isProcessRunning = true;
+    initialProcessedCount = initialProcessedCount || 0;
+    initialReloadedCount = initialReloadedCount || 0;
+
+    const displayTotal = forever ? "∞" : count;
+    injectOverlay("Unfollowing Accounts", displayTotal, initialProcessedCount);
+
+    let processedCount = initialProcessedCount;
+    let fallbackScrolls = 0;
+    let reloadedCount = initialReloadedCount;
+
+    const saveState = () => {
+        chrome.storage.local.set({
+            x_deleter_process: {
+                running: true, type: "START_UNFOLLOW",
+                count, forever, delay, includeBlock,
+                processedCount, reloadedCount
+            }
+        });
+    };
+
+    saveState();
+
+    // Navigate to Following page
+    const profileLink = await waitForElement('a[data-testid="AppTabBar_Profile_Link"]', 10000);
+    if (!profileLink) {
+        updateOverlay("Failed to find Profile Link.");
+        clearState();
+        return;
+    }
+
+    const username = new URL(profileLink.href).pathname.split('/')[1];
+    const followingUrl = `https://x.com/${username}/following`;
+
+    if (window.location.href.split('?')[0] !== followingUrl) {
+        window.location.href = followingUrl;
+        return; // Page will reload, process will resume from storage
+    }
+
+    await waitForElement('[data-testid="UserCell"]', 10000);
+    await new Promise(r => setTimeout(r, 1000));
+
+    while (forever || processedCount < count) {
+        if (!isProcessRunning) break;
+
+        const users = Array.from(document.querySelectorAll('[data-testid="UserCell"]')).filter(user => {
+            return !user.hasAttribute('data-x-processed') && 
+                   (user.querySelector('[data-testid$="-unfollow"]') || user.querySelector('[data-testid="caret"]'));
+        });
+
+        if (users.length === 0) {
+            if (fallbackScrolls > 5) {
+                updateOverlay(`Completed! Processed: ${processedCount}/${displayTotal}`);
+                clearState();
+                break;
+            }
+            window.scrollBy(0, 800);
+            fallbackScrolls++;
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+        }
+
+        fallbackScrolls = 0;
+        let userContainer = users[0];
+        let actionTaken = false;
+        userContainer.setAttribute('data-x-processed', 'true');
+
+        // Try to Unfollow
+        const unfollowBtn = userContainer.querySelector('[data-testid$="-unfollow"]');
+        if (unfollowBtn) {
+            unfollowBtn.click();
+            const confirmBtn = await waitForElement('[data-testid="confirmationSheetConfirm"]', 2000);
+            if (confirmBtn) {
+                confirmBtn.click();
+                actionTaken = true;
+                await new Promise(r => setTimeout(r, 500));
+            } else {
+                document.body.click();
+            }
+        }
+
+        // Try to Block if requested
+        if (includeBlock) {
+            const caret = userContainer.querySelector('[data-testid="caret"]');
+            if (caret) {
+                caret.click();
+                await new Promise(r => setTimeout(r, 700));
+                const menuItems = document.querySelectorAll('[role="menuitem"]');
+                let blockBtn = Array.from(menuItems).find(el => el.textContent.includes('Block'));
+                if (blockBtn) {
+                    blockBtn.click();
+                    await new Promise(r => setTimeout(r, 700));
+                    const confirmBtn = document.querySelector('[data-testid="confirmationSheetConfirm"]');
+                    if (confirmBtn) {
+                        confirmBtn.click();
+                        actionTaken = true;
+                    } else {
+                        document.body.click();
+                    }
+                } else {
+                    document.body.click();
+                }
+            }
+        }
+
+        if (actionTaken) {
+            processedCount++;
+            saveState();
+            updateOverlayCount(processedCount, displayTotal);
+        } else {
+            // If no action taken, we still marked it as processed to skip it
+            continue;
+        }
+
+        await new Promise(r => setTimeout(r, delay));
+    }
+
+
+    if (forever || processedCount >= count) {
+        updateOverlay(`Completed! Processed: ${processedCount}/${displayTotal}`);
         clearState();
     }
 }
@@ -218,20 +320,14 @@ async function startProcess(count, direction, forever, delay, removeReposts, rem
 
 function waitForElement(selector, timeout = 10000) {
     return new Promise((resolve) => {
-        if (document.querySelector(selector)) {
-            return resolve(document.querySelector(selector));
-        }
-
+        if (document.querySelector(selector)) return resolve(document.querySelector(selector));
         const observer = new MutationObserver(() => {
             if (document.querySelector(selector)) {
                 resolve(document.querySelector(selector));
                 observer.disconnect();
             }
         });
-
         observer.observe(document.body, { childList: true, subtree: true });
-
-        // Timeout fallback
         setTimeout(() => {
             observer.disconnect();
             resolve(null);
@@ -240,50 +336,29 @@ function waitForElement(selector, timeout = 10000) {
 }
 
 let overlayEl;
-function injectOverlay(total, current) {
+function injectOverlay(title, total, current) {
     current = current || 0;
-    if (document.getElementById('x-deleter-overlay')) return;
+    if (document.getElementById('x-deleter-overlay')) {
+        updateOverlayCount(current, total);
+        return;
+    }
 
     overlayEl = document.createElement('div');
     overlayEl.id = 'x-deleter-overlay';
-    overlayEl.style.position = 'fixed';
-    overlayEl.style.top = '0';
-    overlayEl.style.left = '0';
-    overlayEl.style.width = '100%';
-    overlayEl.style.backgroundColor = '#1d9bf0'; // X Blue
-    overlayEl.style.color = '#fff';
-    overlayEl.style.display = 'flex';
-    overlayEl.style.justifyContent = 'center';
-    overlayEl.style.alignItems = 'center';
-    overlayEl.style.gap = '20px';
-    overlayEl.style.padding = '10px 15px';
-    overlayEl.style.fontSize = '18px';
-    overlayEl.style.fontWeight = 'bold';
-    overlayEl.style.zIndex = '9999999';
-    overlayEl.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
-    overlayEl.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+    overlayEl.style.cssText = 'position:fixed; top:0; left:0; width:100%; background-color:#1d9bf0; color:#fff; display:flex; justify-content:center; align-items:center; gap:20px; padding:12px 15px; font-size:16px; font-weight:bold; z-index:9999999; box-shadow:0 4px 6px rgba(0,0,0,0.3); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;';
 
     const textEl = document.createElement('span');
     textEl.id = 'x-deleter-text';
-    textEl.innerText = `⚠️ X-Deleter Working... Processed: ${current}/${total}`;
+    textEl.innerText = `⚠️ ${title}... Processed: ${current}/${total}`;
     overlayEl.appendChild(textEl);
 
     const stopBtn = document.createElement('button');
     stopBtn.id = 'x-deleter-stop-btn';
     stopBtn.innerText = "Stop Process";
-    stopBtn.style.backgroundColor = "#fff";
-    stopBtn.style.color = "#f4212e";
-    stopBtn.style.border = "none";
-    stopBtn.style.padding = "6px 16px";
-    stopBtn.style.borderRadius = "9999px";
-    stopBtn.style.cursor = "pointer";
-    stopBtn.style.fontSize = "14px";
-    stopBtn.style.fontWeight = "bold";
-    stopBtn.style.transition = "background-color 0.2s";
+    stopBtn.style.cssText = "background-color:#fff; color:#f4212e; border:none; padding:6px 16px; border-radius:9999px; cursor:pointer; font-size:14px; font-weight:bold; transition:background-color 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.2);";
     
     stopBtn.onmouseover = () => stopBtn.style.backgroundColor = "#f7f9f9";
     stopBtn.onmouseout = () => stopBtn.style.backgroundColor = "#fff";
-    
     stopBtn.onclick = () => {
         stopBtn.disabled = true;
         stopBtn.innerText = "Stopping...";
@@ -291,32 +366,29 @@ function injectOverlay(total, current) {
         updateOverlay("Process Stopped Manually");
     };
     overlayEl.appendChild(stopBtn);
-
     document.body.appendChild(overlayEl);
 }
 
 function updateOverlayCount(current, total) {
     const textEl = document.getElementById('x-deleter-text');
     if (textEl) {
-        textEl.innerText = `⚠️ X-Deleter Working... Processed: ${current}/${total}`;
+        const title = textEl.innerText.split('...')[0];
+        textEl.innerText = `${title}... Processed: ${current}/${total}`;
     }
 }
 
 function updateOverlay(text) {
     const textEl = document.getElementById('x-deleter-text');
     const stopBtn = document.getElementById('x-deleter-stop-btn');
-
-    if (textEl) {
-        textEl.innerText = text;
-    }
-
+    if (textEl) textEl.innerText = text;
     if (overlayEl) {
-        if (text.includes("Completed") || text.includes("No more tweets") || text.includes("Stopped")) {
-            overlayEl.style.backgroundColor = '#00ba7c'; // Green
-            if (stopBtn) stopBtn.remove(); // Hide stop button when done
+        if (text.includes("Completed") || text.includes("No more") || text.includes("Stopped")) {
+            overlayEl.style.backgroundColor = '#00ba7c';
+            if (stopBtn) stopBtn.remove();
         } else if (text.includes("Failed")) {
-            overlayEl.style.backgroundColor = '#f4212e'; // Red
+            overlayEl.style.backgroundColor = '#f4212e';
             if (stopBtn) stopBtn.remove();
         }
     }
 }
+

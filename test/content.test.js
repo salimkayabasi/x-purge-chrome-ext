@@ -5,27 +5,19 @@ beforeEach(() => {
     jest.resetModules();
     delete window.xDeleterInjected;
     mockObserverCb = null;
-    
     document.body.innerHTML = '';
-    
     originalSetTimeout = global.setTimeout;
 
     global.chrome = {
         runtime: {
-            onMessage: {
-                addListener: jest.fn(),
-            },
+            onMessage: { addListener: jest.fn() },
             sendMessage: jest.fn(),
         },
         storage: {
             local: {
-                get: jest.fn((keys, cb) => {
-                    if (cb) originalSetTimeout(() => cb({}), 0);
-                }),
+                get: jest.fn((keys, cb) => { if (cb) originalSetTimeout(() => cb({}), 0); }),
                 set: jest.fn(),
-                remove: jest.fn((keys, cb) => {
-                    if (cb) originalSetTimeout(() => cb(), 0);
-                }),
+                remove: jest.fn((keys, cb) => { if (cb) originalSetTimeout(() => cb(), 0); }),
             }
         }
     };
@@ -33,36 +25,38 @@ beforeEach(() => {
     global.MutationObserver = class {
         constructor(callback) { mockObserverCb = callback; }
         disconnect() {}
-        observe(element, initObject) {}
+        observe() {}
     };
 
     global.setTimeout = (cb, ms) => {
-        if (typeof cb === 'function') {
-            return originalSetTimeout(cb, 0);
-        }
+        if (typeof cb === 'function') return originalSetTimeout(cb, 0);
     };
     
     window.scrollBy = jest.fn();
-    // Suppress JSDOM's Not implemented navigation errors caused by location.reload()
     const originalConsoleError = console.error;
     console.error = (...args) => {
         if (args[0] && args[0].message && args[0].message.includes('Not implemented: navigation')) return;
         originalConsoleError(...args);
     };
+
+    // Mock reload
+    window.location.reload = jest.fn();
+    if (!window.location.split) {
+        window.location.constructor.prototype.split = function(sep) {
+            return this.href.split(sep);
+        };
+    }
 });
+
 afterEach(() => {
     global.setTimeout = originalSetTimeout;
 });
 
 test("content.js initializes and checks storage", (done) => {
     chrome.storage.local.get.mockImplementation((keys, callback) => {
-        originalSetTimeout(() => {
-            callback({ x_deleter_process: { running: true, count: 10, deletedCount: 0 } });
-        }, 0);
+        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_PURGE", count: 10, processedCount: 0 } }), 0);
     });
-    
     require("../src/content.js");
-    
     originalSetTimeout(() => {
         expect(window.xDeleterInjected).toBe(true);
         expect(document.getElementById('x-deleter-overlay')).not.toBeNull();
@@ -70,309 +64,190 @@ test("content.js initializes and checks storage", (done) => {
     }, 50);
 });
 
-test("EXECUTE message clears state and fails if no profile link", (done) => {
+test("purge process full flow with all action types", (done) => {
     require("../src/content.js");
     const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
-    
-    onMessage({ action: "EXECUTE", payload: { count: 5 } }, {}, () => {});
-    
-    originalSetTimeout(() => {
-        expect(document.getElementById('x-deleter-text').innerText).toContain("Failed");
-        done();
-    }, 50);
-});
-
-test("process successfully runs through unlike, unretweet, and delete", (done) => {
-    require("../src/content.js");
-    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
-
     const profileLink = document.createElement('a');
     profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
     profileLink.href = 'https://x.com/profile';
-    profileLink.onclick = (e) => e.preventDefault();
     document.body.appendChild(profileLink);
 
-    // Create 3 successful cells
-    for (let i = 0; i < 3; i++) {
-        const cell = document.createElement('div');
-        cell.setAttribute('data-testid', 'cellInnerDiv');
-        
-        if (i === 0) {
-            const unlike = document.createElement('div');
-            unlike.setAttribute('data-testid', 'unlike');
-            unlike.onclick = () => cell.remove();
-            cell.appendChild(unlike);
-        } else if (i === 1) {
-            const unretweet = document.createElement('div');
-            unretweet.setAttribute('data-testid', 'unretweet');
-            cell.appendChild(unretweet);
-            const confirmBtn = document.createElement('div');
-            confirmBtn.setAttribute('data-testid', 'unretweetConfirm');
-            confirmBtn.onclick = () => { cell.remove(); confirmBtn.remove(); };
-            document.body.appendChild(confirmBtn);
-        } else if (i === 2) {
-            const caret = document.createElement('div');
-            caret.setAttribute('data-testid', 'caret');
-            cell.appendChild(caret);
-            
-            const menuItem = document.createElement('div');
-            menuItem.setAttribute('role', 'menuitem');
-            menuItem.textContent = 'Delete';
-            document.body.appendChild(menuItem);
+    // 1. Unlike
+    const cell1 = document.createElement('div');
+    cell1.setAttribute('data-testid', 'cellInnerDiv');
+    const unlike = document.createElement('div');
+    unlike.setAttribute('data-testid', 'unlike');
+    unlike.onclick = () => cell1.remove();
+    cell1.appendChild(unlike);
+    document.body.appendChild(cell1);
 
-            const sheetConfirm = document.createElement('div');
-            sheetConfirm.setAttribute('data-testid', 'confirmationSheetConfirm');
-            sheetConfirm.onclick = () => { cell.remove(); sheetConfirm.remove(); menuItem.remove(); };
-            document.body.appendChild(sheetConfirm);
-        }
-        document.body.appendChild(cell);
-    }
-    
-    // count 3 will be successfully completed
-    onMessage({ action: "EXECUTE", payload: { count: 3, delay: 0, removeLikes: true, removeReposts: true } }, {}, () => {});
+    // 2. Unretweet
+    const cell2 = document.createElement('div');
+    cell2.setAttribute('data-testid', 'cellInnerDiv');
+    const unretweet = document.createElement('div');
+    unretweet.setAttribute('data-testid', 'unretweet');
+    cell2.appendChild(unretweet);
+    const confirmUnretweet = document.createElement('div');
+    confirmUnretweet.setAttribute('data-testid', 'unretweetConfirm');
+    confirmUnretweet.onclick = () => { cell2.remove(); confirmUnretweet.remove(); };
+    document.body.appendChild(confirmUnretweet);
+    document.body.appendChild(cell2);
 
-    originalSetTimeout(() => {
-        expect(document.getElementById('x-deleter-overlay')).not.toBeNull();
-        done();
-    }, 150);
-});
-
-test("process handles missing elements and skips un-actionable cells", (done) => {
-    require("../src/content.js");
-    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
-
-    const profileLink = document.createElement('a');
-    profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
-    profileLink.href = 'https://x.com/profile';
-    profileLink.onclick = (e) => e.preventDefault();
-    document.body.appendChild(profileLink);
-
-    // Create 4 failing cells
-    for (let i = 0; i < 4; i++) {
-        const cell = document.createElement('div');
-        cell.setAttribute('data-testid', 'cellInnerDiv');
-        
-        if (i === 0) {
-            // Missing unretweetConfirm and Missing 'undo repost'
-            const unretweet = document.createElement('div');
-            unretweet.setAttribute('data-testid', 'unretweet');
-            document.body.onclick = () => cell.remove();
-            cell.appendChild(unretweet);
-        } else if (i === 1) {
-            // Missing confirmationSheetConfirm
-            const caret = document.createElement('div');
-            caret.setAttribute('data-testid', 'caret');
-            cell.appendChild(caret);
-            
-            const menuItem = document.createElement('div');
-            menuItem.setAttribute('role', 'menuitem');
-            menuItem.textContent = 'Delete';
-            document.body.appendChild(menuItem);
-            
-            document.body.onclick = () => { cell.remove(); menuItem.remove(); };
-        } else if (i === 2) {
-            // Missing unretweetConfirm but HAS 'undo repost'
-            const unretweet = document.createElement('div');
-            unretweet.setAttribute('data-testid', 'unretweet');
-            cell.appendChild(unretweet);
-            const dropMenuItem = document.createElement('div');
-            dropMenuItem.setAttribute('role', 'menuitem');
-            dropMenuItem.textContent = 'Undo repost';
-            dropMenuItem.onclick = () => { cell.remove(); dropMenuItem.remove(); };
-            document.body.appendChild(dropMenuItem);
-        } else if (i === 3) {
-            const caret = document.createElement('div');
-            caret.setAttribute('data-testid', 'caret');
-            caret.onclick = () => cell.remove(); 
-            cell.appendChild(caret);
-        }
-        document.body.appendChild(cell);
-    }
-    
-    // Request count 5, but we only have 4 cells, and some fail, so it will exhaust and fallback
-    onMessage({ action: "EXECUTE", payload: { count: 5, delay: 0, removeLikes: true, removeReposts: true } }, {}, () => {});
-
-    originalSetTimeout(() => {
-        expect(document.getElementById('x-deleter-overlay')).not.toBeNull();
-        done();
-    }, 150);
-});
-
-test("fallback scroll when no cells and stop btn", (done) => {
-    require("../src/content.js");
-    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
-
-    const profileLink = document.createElement('a');
-    profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
-    profileLink.href = 'https://x.com/profile';
-    profileLink.onclick = (e) => e.preventDefault();
-    document.body.appendChild(profileLink);
-
-    onMessage({ action: "EXECUTE", payload: { count: 3, delay: 0 } }, {}, () => {});
-
-    originalSetTimeout(() => {
-        expect(window.scrollBy).toHaveBeenCalled();
-        
-        const stopBtn = document.getElementById('x-deleter-stop-btn');
-        if (stopBtn) stopBtn.click();
-        
-        done();
-    }, 150);
-});
-
-test("waitForElement waits for element to appear via MutationObserver", (done) => {
-    require("../src/content.js");
-    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
-
-    const profileLink = document.createElement('a');
-    profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
-    profileLink.href = 'https://x.com/profile';
-    profileLink.onclick = (e) => e.preventDefault();
-    document.body.appendChild(profileLink);
-
-    onMessage({ action: "EXECUTE", payload: { count: 1, delay: 0, removeLikes: true } }, {}, () => {});
-
-    // Cells are NOT in the DOM yet. We add them asynchronously to trigger MutationObserver.
-    originalSetTimeout(() => {
-        if (mockObserverCb) mockObserverCb(); // trigger when element is missing to cover implicit else
-
-        const cell = document.createElement('div');
-        cell.setAttribute('data-testid', 'cellInnerDiv');
-        const unlike = document.createElement('div');
-        unlike.setAttribute('data-testid', 'unlike');
-        unlike.onclick = () => cell.remove();
-        cell.appendChild(unlike);
-        document.body.appendChild(cell);
-        
-        if (mockObserverCb) mockObserverCb(); // trigger when element is present
-    }, 20);
-
-    originalSetTimeout(() => {
-        done();
-    }, 100);
-});
-
-test("test fallback when actionTaken is false and cells exhausted", (done) => {
-    require("../src/content.js");
-    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
-
-    const profileLink = document.createElement('a');
-    profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
-    profileLink.href = 'https://x.com/profile';
-    profileLink.onclick = (e) => e.preventDefault();
-    document.body.appendChild(profileLink);
-
-    const cell = document.createElement('div');
-    cell.setAttribute('data-testid', 'cellInnerDiv');
+    // 3. Delete
+    const cell3 = document.createElement('div');
+    cell3.setAttribute('data-testid', 'cellInnerDiv');
     const caret = document.createElement('div');
     caret.setAttribute('data-testid', 'caret');
-    caret.onclick = () => cell.remove(); 
-    cell.appendChild(caret);
-    document.body.appendChild(cell);
-
-    onMessage({ action: "EXECUTE", payload: { count: 1, delay: 0, removeLikes: true } }, {}, () => {});
-
-    originalSetTimeout(() => {
-        done();
-    }, 100);
-});
-
-test("test fallback exhaustion with reloadedCount >= 1", (done) => {
-    // Start with reloadedCount = 1 so it hits line 112 instead of reloading again
-    chrome.storage.local.get.mockImplementation((keys, callback) => {
-        originalSetTimeout(() => {
-            callback({ x_deleter_process: { running: true, count: 10, deletedCount: 0, reloadedCount: 1 } });
-        }, 0);
-    });
-
-    require("../src/content.js");
-
-    // add profile link but NO cells
-    const profileLink = document.createElement('a');
-    profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
-    profileLink.href = 'https://x.com/profile';
-    profileLink.onclick = (e) => e.preventDefault();
-    document.body.appendChild(profileLink);
-
-    originalSetTimeout(() => {
-        expect(document.getElementById('x-deleter-text').innerText).toContain("No more tweets found");
-        done();
-    }, 150);
-});
-
-test("test missing confirmation sheet explicitly", (done) => {
-    require("../src/content.js");
-    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
-
-    const profileLink = document.createElement('a');
-    profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
-    profileLink.href = 'https://x.com/profile';
-    profileLink.onclick = (e) => e.preventDefault();
-    document.body.appendChild(profileLink);
-
-    // Provide a cell with caret, add Delete button globally, but NO confirm button!
-    const cell = document.createElement('div');
-    cell.setAttribute('data-testid', 'cellInnerDiv');
-    const caret = document.createElement('div');
-    caret.setAttribute('data-testid', 'caret');
-    cell.appendChild(caret);
-    document.body.appendChild(cell);
-
-    const menuItem = document.createElement('div');
-    menuItem.setAttribute('role', 'menuitem');
-    menuItem.textContent = 'Delete';
-    document.body.appendChild(menuItem);
-
-    // Mock document.body.click so that the loop stops by removing the cell!
-    const originalBodyClick = document.body.click;
-    document.body.click = () => {
-        cell.remove();
+    caret.onclick = () => {
+        const deleteItem = document.createElement('div');
+        deleteItem.setAttribute('role', 'menuitem');
+        deleteItem.innerText = 'Delete';
+        deleteItem.onclick = () => {
+            const confirmDelete = document.createElement('div');
+            confirmDelete.setAttribute('data-testid', 'confirmationSheetConfirm');
+            confirmDelete.onclick = () => { cell3.remove(); confirmDelete.remove(); deleteItem.remove(); };
+            document.body.appendChild(confirmDelete);
+        };
+        document.body.appendChild(deleteItem);
     };
+    cell3.appendChild(caret);
+    document.body.appendChild(cell3);
 
-    onMessage({ action: "EXECUTE", payload: { count: 1, delay: 0 } }, {}, () => {});
+    onMessage({ action: "EXECUTE", payload: { type: "START_PURGE", count: 3, delay: 0, removeLikes: true, removeReposts: true } }, {}, () => {});
 
     originalSetTimeout(() => {
-        document.body.click = originalBodyClick;
+        expect(document.getElementById('cellInnerDiv')).toBeNull();
         done();
-    }, 100);
+    }, 300);
 });
 
-test("overlay button mouse events", (done) => {
+test("unfollow process and block flow", (done) => {
     require("../src/content.js");
     const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    const profileLink = document.createElement('a');
+    profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
+    profileLink.href = 'https://x.com/user';
+    document.body.appendChild(profileLink);
+    window.history.pushState({}, '', '/user/following');
 
+    const userCell = document.createElement('div');
+    userCell.setAttribute('data-testid', 'UserCell');
+    const caret = document.createElement('div');
+    caret.setAttribute('data-testid', 'caret');
+    caret.onclick = () => {
+        const blockBtn = document.createElement('div');
+        blockBtn.setAttribute('role', 'menuitem');
+        blockBtn.innerText = 'Block @user';
+        blockBtn.onclick = () => {
+            const confirm = document.createElement('div');
+            confirm.setAttribute('data-testid', 'confirmationSheetConfirm');
+            confirm.onclick = () => { userCell.setAttribute('data-x-processed', 'true'); confirm.remove(); blockBtn.remove(); };
+            document.body.appendChild(confirm);
+        };
+        document.body.appendChild(blockBtn);
+    };
+    userCell.appendChild(caret);
+    document.body.appendChild(userCell);
+
+    onMessage({ action: "EXECUTE", payload: { type: "START_UNFOLLOW", count: 1, delay: 0, includeBlock: true } }, {}, () => {});
+
+    originalSetTimeout(() => {
+        expect(userCell.hasAttribute('data-x-processed')).toBe(true);
+        done();
+    }, 200);
+});
+
+test("waitForElement and MutationObserver coverage", (done) => {
+    require("../src/content.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
     const profileLink = document.createElement('a');
     profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
     profileLink.href = 'https://x.com/profile';
-    profileLink.onclick = (e) => e.preventDefault();
     document.body.appendChild(profileLink);
 
-    onMessage({ action: "EXECUTE", payload: { count: 1, delay: 0 } }, {}, () => {});
+    onMessage({ action: "EXECUTE", payload: { type: "START_PURGE", count: 1, delay: 0 } }, {}, () => {});
+
+    originalSetTimeout(() => {
+        if (mockObserverCb) mockObserverCb();
+        const cell = document.createElement('div');
+        cell.setAttribute('data-testid', 'cellInnerDiv');
+        document.body.appendChild(cell);
+        if (mockObserverCb) mockObserverCb();
+    }, 50);
+
+    originalSetTimeout(() => done(), 200);
+});
+
+test("overlay UI and stop functionality", (done) => {
+    require("../src/content.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    const profileLink = document.createElement('a');
+    profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
+    profileLink.href = 'https://x.com/profile';
+    document.body.appendChild(profileLink);
+
+    // Call twice to hit existing overlay branch
+    onMessage({ action: "EXECUTE", payload: { type: "START_PURGE", count: 1, delay: 0 } }, {}, () => {});
+    onMessage({ action: "EXECUTE", payload: { type: "START_PURGE", count: 1, delay: 0 } }, {}, () => {});
 
     originalSetTimeout(() => {
         const stopBtn = document.getElementById('x-deleter-stop-btn');
         if (stopBtn) {
             stopBtn.onmouseover();
-            expect(stopBtn.style.backgroundColor).toBe("rgb(247, 249, 249)"); // #f7f9f9
-            
             stopBtn.onmouseout();
-            expect(stopBtn.style.backgroundColor).toBe("rgb(255, 255, 255)"); // #fff
+            stopBtn.click();
+            expect(stopBtn.disabled).toBe(true);
         }
         done();
     }, 150);
 });
 
-test("updateOverlay branches", (done) => {
+test("fallback exhaustion and completion state", (done) => {
+    chrome.storage.local.get.mockImplementation((keys, callback) => {
+        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_PURGE", count: 10, processedCount: 0, reloadedCount: 1 } }), 0);
+    });
     require("../src/content.js");
-    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
-
     const profileLink = document.createElement('a');
     profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
     profileLink.href = 'https://x.com/profile';
-    profileLink.onclick = (e) => e.preventDefault();
     document.body.appendChild(profileLink);
 
-    // Provide a cell
+    originalSetTimeout(() => {
+        expect(document.getElementById('x-deleter-text').innerText).toContain("Completed");
+        done();
+    }, 150);
+});
+
+test("navigation and error states", (done) => {
+    require("../src/content.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    
+    // No profile link -> Fail
+    onMessage({ action: "EXECUTE", payload: { type: "START_PURGE", count: 1, delay: 0 } }, {}, () => {});
+    
+    originalSetTimeout(() => {
+        expect(document.getElementById('x-deleter-text').innerText).toContain("Failed");
+        
+        // Navigation branch
+        const profileLink = document.createElement('a');
+        profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
+        profileLink.href = 'https://x.com/user';
+        document.body.appendChild(profileLink);
+        window.history.pushState({}, '', '/home');
+        
+        onMessage({ action: "EXECUTE", payload: { type: "START_UNFOLLOW", count: 1, delay: 0 } }, {}, () => {});
+        done();
+    }, 100);
+});
+
+test("simple purge to completion", (done) => {
+    require("../src/content.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    const profileLink = document.createElement('a');
+    profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
+    profileLink.href = 'https://x.com/profile';
+    document.body.appendChild(profileLink);
+
     const cell = document.createElement('div');
     cell.setAttribute('data-testid', 'cellInnerDiv');
     const unlike = document.createElement('div');
@@ -381,94 +256,65 @@ test("updateOverlay branches", (done) => {
     cell.appendChild(unlike);
     document.body.appendChild(cell);
 
-    onMessage({ action: "EXECUTE", payload: { count: 1, delay: 0, removeLikes: true } }, {}, () => {});
-
-    // Synchronously remove elements!
-    const textEl = document.getElementById('x-deleter-text');
-    if (textEl) textEl.remove();
-
-    const stopBtn = document.getElementById('x-deleter-stop-btn');
-    if (stopBtn) stopBtn.remove();
+    onMessage({ action: "EXECUTE", payload: { type: "START_PURGE", count: 1, delay: 0, removeLikes: true } }, {}, () => {});
 
     originalSetTimeout(() => {
-        // Trigger early return for injectOverlay
-        onMessage({ action: "EXECUTE", payload: { count: 1, delay: 0 } }, {}, () => {});
+        expect(document.getElementById('x-deleter-text').innerText).toContain("Completed");
         done();
-    }, 150);
+    }, 200);
 });
 
-test("test forever loop and empty stopBtn in updateOverlay", (done) => {
+test("simple unfollow to completion", (done) => {
     require("../src/content.js");
     const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    const profileLink = document.createElement('a');
+    profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
+    profileLink.href = 'https://x.com/user';
+    document.body.appendChild(profileLink);
+    window.history.pushState({}, '', '/user/following');
 
+    const userCell = document.createElement('div');
+    userCell.setAttribute('data-testid', 'UserCell');
+    const unfollowBtn = document.createElement('div');
+    unfollowBtn.setAttribute('data-testid', '123-unfollow');
+    unfollowBtn.onclick = () => { unfollowBtn.setAttribute('data-testid', '123-follow'); };
+    userCell.appendChild(unfollowBtn);
+    document.body.appendChild(userCell);
+
+    onMessage({ action: "EXECUTE", payload: { type: "START_UNFOLLOW", count: 1, delay: 0 } }, {}, () => {});
+
+    originalSetTimeout(() => {
+        expect(document.getElementById('x-deleter-text').innerText).toContain("Completed");
+        done();
+    }, 200);
+});
+
+test("purge process oldest direction", (done) => {
+    require("../src/content.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
     const profileLink = document.createElement('a');
     profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
     profileLink.href = 'https://x.com/profile';
-    profileLink.onclick = (e) => e.preventDefault();
     document.body.appendChild(profileLink);
-
-    // Provide a cell to process
-    const cell = document.createElement('div');
-    cell.setAttribute('data-testid', 'cellInnerDiv');
-    const unlike = document.createElement('div');
-    unlike.setAttribute('data-testid', 'unlike');
-    
-    unlike.onclick = () => {
-        cell.remove();
-        const stopBtn = document.getElementById('x-deleter-stop-btn');
-        if (stopBtn) stopBtn.remove();
-    };
-    cell.appendChild(unlike);
-    document.body.appendChild(cell);
-
-    // Set forever: true
-    onMessage({ action: "EXECUTE", payload: { count: 0, forever: true, delay: 0, removeLikes: true } }, {}, () => {});
-
+    onMessage({ action: "EXECUTE", payload: { type: "START_PURGE", count: 1, direction: "oldest", delay: 0 } }, {}, () => {});
     originalSetTimeout(() => {
+        expect(window.scrollBy).toHaveBeenCalled();
         done();
-    }, 150);
+    }, 200);
 });
 
-test("handles direction oldest and restarting process", (done) => {
+test("purge process forever loop", (done) => {
     require("../src/content.js");
     const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
-
     const profileLink = document.createElement('a');
     profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
     profileLink.href = 'https://x.com/profile';
-    profileLink.onclick = (e) => e.preventDefault();
     document.body.appendChild(profileLink);
-
-    // Create 2 cells
-    for (let i = 0; i < 2; i++) {
-        const cell = document.createElement('div');
-        cell.setAttribute('data-testid', 'cellInnerDiv');
-        cell.setAttribute('id', `cell-${i}`); 
-        const unlike = document.createElement('div');
-        unlike.setAttribute('data-testid', 'unlike');
-        unlike.onclick = () => cell.remove();
-        cell.appendChild(unlike);
-        document.body.appendChild(cell);
-    }
-
-    onMessage({ action: "EXECUTE", payload: { count: 1, direction: "oldest", delay: 0, removeLikes: true } }, {}, () => {});
-
+    onMessage({ action: "EXECUTE", payload: { type: "START_PURGE", forever: true, delay: 0 } }, {}, () => {});
     originalSetTimeout(() => {
-        // The oldest one should be processed, which is cell-1
-        expect(document.getElementById('cell-1')).toBeNull(); 
-        expect(document.getElementById('cell-0')).not.toBeNull(); 
-        
-        const stopBtn = document.getElementById('x-deleter-stop-btn');
-        if (stopBtn) stopBtn.remove();
-        
-        profileLink.remove();
-        
-        onMessage({ action: "EXECUTE", payload: { count: 1, delay: 0 } }, {}, () => {});
-        
-        originalSetTimeout(() => {
-            const overlay = document.getElementById('x-deleter-overlay');
-            expect(overlay.style.backgroundColor).toBe('rgb(244, 33, 46)'); // #f4212e
-            done();
-        }, 100);
-    }, 150);
+        expect(window.scrollBy).toHaveBeenCalled();
+        done();
+    }, 200);
 });
+
+

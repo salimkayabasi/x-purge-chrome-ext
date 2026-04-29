@@ -29,7 +29,7 @@ test("background.js registers listeners", () => {
     expect(chrome.tabs.onUpdated.addListener).toHaveBeenCalled();
 });
 
-test("handles START_DELETION on an X.com tab", () => {
+test("handles START_PURGE on an X.com tab", () => {
     require("../src/background.js");
     const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
     
@@ -39,7 +39,7 @@ test("handles START_DELETION on an X.com tab", () => {
     });
     
     const sendResponse = jest.fn();
-    const result = onMessage({ action: "START_DELETION", payload: { mode: "foreground" } }, {}, sendResponse);
+    const result = onMessage({ action: "START_PURGE", payload: { mode: "foreground" } }, {}, sendResponse);
     
     expect(result).toBe(true); // Returns true for async response
     expect(chrome.scripting.executeScript).toHaveBeenCalledWith(
@@ -56,12 +56,12 @@ test("handles START_DELETION on an X.com tab", () => {
     
     expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(101, {
         action: "EXECUTE",
-        payload: expect.objectContaining({ mode: "foreground", status: "injected" })
+        payload: expect.objectContaining({ mode: "foreground", status: "injected", type: "START_PURGE" })
     });
     jest.useRealTimers();
 });
 
-test("handles START_DELETION on a non-X.com tab", () => {
+test("handles START_PURGE on a non-X.com tab", () => {
     require("../src/background.js");
     const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
     
@@ -76,7 +76,7 @@ test("handles START_DELETION on a non-X.com tab", () => {
     });
     
     const sendResponse = jest.fn();
-    onMessage({ action: "START_DELETION", payload: { mode: "background" } }, {}, sendResponse);
+    onMessage({ action: "START_PURGE", payload: { mode: "background" } }, {}, sendResponse);
     
     expect(chrome.tabs.create).toHaveBeenCalledWith(
         expect.objectContaining({ url: "https://x.com/home", active: false }),
@@ -85,18 +85,17 @@ test("handles START_DELETION on a non-X.com tab", () => {
     expect(sendResponse).toHaveBeenCalledWith({ success: true });
 });
 
-test("handles STOP_DELETION", () => {
+test("handles STOP_TASK", () => {
     require("../src/background.js");
     const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
     
-    // First setup an active deletion
+    // First setup an active task
     chrome.tabs.query.mockImplementation((queryInfo, callback) => {
         callback([{ id: 101, url: "https://x.com/home" }]);
     });
-    onMessage({ action: "START_DELETION", payload: { mode: "foreground" } }, {}, jest.fn());
+    onMessage({ action: "START_PURGE", payload: { mode: "foreground" } }, {}, jest.fn());
     
-    onMessage({ action: "STOP_DELETION" }, { tab: { id: 101 } }, jest.fn());
-    // activeDeletions would be manipulated, we can check it indirectly or just ensure it doesn't throw
+    onMessage({ action: "STOP_TASK" }, { tab: { id: 101 } }, jest.fn());
 });
 
 test("handles tabs.onUpdated for X.com tab", () => {
@@ -104,15 +103,15 @@ test("handles tabs.onUpdated for X.com tab", () => {
     const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
     const onUpdated = chrome.tabs.onUpdated.addListener.mock.calls[0][0];
     
-    // Set up active deletion first
+    // Set up active task first
     chrome.tabs.query.mockImplementation((queryInfo, callback) => {
         callback([{ id: 101, url: "https://x.com/home" }]);
     });
-    onMessage({ action: "START_DELETION", payload: { mode: "foreground" } }, {}, jest.fn());
+    onMessage({ action: "START_PURGE", payload: { mode: "foreground" } }, {}, jest.fn());
     
     // Now trigger onUpdated with different conditions to cover branches
     onUpdated(101, { status: 'loading' }, { url: "https://x.com/somepage" }); // changeInfo.status !== 'complete'
-    onUpdated(102, { status: 'complete' }, { url: "https://x.com/somepage" }); // !activeDeletions[tabId]
+    onUpdated(102, { status: 'complete' }, { url: "https://x.com/somepage" }); // !activeTasks[tabId]
     onUpdated(101, { status: 'complete' }, { url: "https://google.com" }); // url doesn't match
     
     // This one should trigger reinject
@@ -121,9 +120,9 @@ test("handles tabs.onUpdated for X.com tab", () => {
     expect(chrome.scripting.executeScript).toHaveBeenCalledTimes(2); // once from START, once from UPDATE
 });
 
-test("handles STOP_DELETION without sender tab", () => {
+test("handles STOP_TASK without sender tab", () => {
     require("../src/background.js");
     const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
-    // Call STOP_DELETION with no tab in sender to cover the branch
-    onMessage({ action: "STOP_DELETION" }, {}, jest.fn());
+    onMessage({ action: "STOP_TASK" }, {}, jest.fn());
 });
+
