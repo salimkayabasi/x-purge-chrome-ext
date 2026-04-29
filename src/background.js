@@ -1,7 +1,7 @@
 let activeTasks = {}; // Maps tabId -> state
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === "START_PURGE" || message.action === "START_UNFOLLOW" || message.action === "START_DISLIKE") {
+    if (message.action === "START_PURGE" || message.action === "START_UNFOLLOW" || message.action === "START_DISLIKE" || message.action === "START_UNBOOKMARK") {
         const payload = { ...message.payload, type: message.action };
         const isActive = payload.mode === "foreground";
         

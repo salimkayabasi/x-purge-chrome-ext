@@ -9,6 +9,8 @@ if (typeof window.xDeleterInjected === 'undefined') {
                 startUnfollowProcess(p.count, p.forever, p.delay, p.includeBlock, p.processedCount, p.reloadedCount || 0);
             } else if (p.type === "START_DISLIKE") {
                 startDislikeProcess(p.count, p.forever, p.delay, p.processedCount, p.reloadedCount || 0);
+            } else if (p.type === "START_UNBOOKMARK") {
+                startUnbookmarkProcess(p.count, p.forever, p.delay, p.processedCount, p.reloadedCount || 0);
             } else {
                 startPurgeProcess(
                     p.count, p.direction, p.forever, p.delay, p.removeReposts, p.removeLikes,
@@ -30,6 +32,12 @@ if (typeof window.xDeleterInjected === 'undefined') {
                     );
                 } else if (message.payload.type === "START_DISLIKE") {
                     startDislikeProcess(
+                        message.payload.count,
+                        message.payload.forever,
+                        message.payload.delay
+                    );
+                } else if (message.payload.type === "START_UNBOOKMARK") {
+                    startUnbookmarkProcess(
                         message.payload.count,
                         message.payload.forever,
                         message.payload.delay
@@ -430,6 +438,106 @@ async function startDislikeProcess(count, forever, delay, initialProcessedCount,
         clearState();
     }
 }
+
+async function startUnbookmarkProcess(count, forever, delay, initialProcessedCount, initialReloadedCount) {
+    if (isProcessRunning) return;
+    isProcessRunning = true;
+    initialProcessedCount = initialProcessedCount || 0;
+    initialReloadedCount = initialReloadedCount || 0;
+
+    const displayTotal = forever ? "∞" : count;
+    injectOverlay("Removing Bookmarks", displayTotal, initialProcessedCount);
+
+    let processedCount = initialProcessedCount;
+    let fallbackScrolls = 0;
+    let reloadedCount = initialReloadedCount;
+
+    const saveState = () => {
+        chrome.storage.local.set({
+            x_deleter_process: {
+                running: true, type: "START_UNBOOKMARK",
+                count, forever, delay,
+                processedCount, reloadedCount
+            }
+        });
+    };
+
+    saveState();
+
+    // Navigate to Bookmarks page
+    const bookmarksUrl = "https://x.com/i/bookmarks";
+
+    if (window.location.href.split('?')[0] !== bookmarksUrl) {
+        window.location.href = bookmarksUrl;
+        return; // Page will reload, process will resume from storage
+    }
+
+    await waitForElement('[data-testid="cellInnerDiv"]', 10000);
+    await new Promise(r => setTimeout(r, 1000));
+
+    while (forever || processedCount < count) {
+        if (!isProcessRunning) break;
+
+        const cells = Array.from(document.querySelectorAll('[data-testid="cellInnerDiv"]')).filter(cell => {
+            return cell.querySelector('[data-testid="removeBookmark"]') || 
+                   cell.querySelector('[data-testid="bookmark"]') ||
+                   cell.querySelector('[aria-label*="Remove Tweet from Bookmarks"]');
+        });
+
+        if (cells.length === 0) {
+            if (fallbackScrolls > 10) {
+                if (reloadedCount < 1) {
+                    reloadedCount++;
+                    saveState();
+                    updateOverlay("No more bookmarks found. Reloading...");
+                    await new Promise(r => setTimeout(r, 1500));
+                    location.reload();
+                    return;
+                }
+                updateOverlay(`Completed! Processed: ${processedCount}/${displayTotal}`);
+                clearState();
+                break;
+            }
+            window.scrollBy(0, 1000);
+            fallbackScrolls++;
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+        }
+
+        fallbackScrolls = 0;
+        let tweetContainer = cells[0];
+        let actionTaken = false;
+
+        let removeBtn = tweetContainer.querySelector('[data-testid="removeBookmark"]') || 
+                        tweetContainer.querySelector('[data-testid="bookmark"]') ||
+                        tweetContainer.querySelector('[aria-label*="Remove Tweet from Bookmarks"]');
+
+        if (removeBtn) {
+            removeBtn.click();
+            actionTaken = true;
+        }
+
+        if (actionTaken) {
+            processedCount++;
+            saveState();
+            updateOverlayCount(processedCount, displayTotal);
+            // Small scroll to keep things moving
+            window.scrollBy(0, 150);
+        } else {
+            window.scrollBy(0, 400);
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+        }
+
+        await new Promise(r => setTimeout(r, delay));
+    }
+
+    if (forever || processedCount >= count) {
+        updateOverlay(`Completed! Processed: ${processedCount}/${displayTotal}`);
+        clearState();
+    }
+}
+
 
 // ---------------- Helpers ----------------
 

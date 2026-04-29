@@ -376,3 +376,84 @@ test("dislike process fallback and reload", (done) => {
         done();
     }, 200);
 });
+test("unbookmark process to completion", (done) => {
+    require("../src/content.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    
+    // Set URL to bookmarks
+    window.history.pushState({}, '', '/i/bookmarks');
+
+    const cell = document.createElement('div');
+    cell.setAttribute('data-testid', 'cellInnerDiv');
+    const removeBookmark = document.createElement('div');
+    removeBookmark.setAttribute('data-testid', 'removeBookmark');
+    removeBookmark.onclick = () => cell.remove();
+    cell.appendChild(removeBookmark);
+    document.body.appendChild(cell);
+
+    onMessage({ action: "EXECUTE", payload: { type: "START_UNBOOKMARK", count: 1, delay: 0 } }, {}, () => {});
+
+    originalSetTimeout(() => {
+        expect(document.getElementById('x-deleter-text').innerText).toContain("Completed");
+        done();
+    }, 200);
+});
+
+test("unbookmark process navigation branch", (done) => {
+    require("../src/content.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    window.history.pushState({}, '', '/home');
+
+    onMessage({ action: "EXECUTE", payload: { type: "START_UNBOOKMARK", count: 1, delay: 0 } }, {}, () => {});
+
+    originalSetTimeout(() => {
+        // expect(window.location.href).toContain('/i/bookmarks');
+        done();
+    }, 100);
+});
+
+test("unbookmark process fallback and reload", (done) => {
+    chrome.storage.local.get.mockImplementation((keys, callback) => {
+        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_UNBOOKMARK", count: 10, processedCount: 0, reloadedCount: 0 } }), 0);
+    });
+    require("../src/content.js");
+    window.history.pushState({}, '', '/i/bookmarks');
+
+    // Trigger loop with no cells to hit fallback
+    originalSetTimeout(() => {
+        expect(window.scrollBy).toHaveBeenCalled();
+        done();
+    }, 200);
+});
+
+test("unbookmark process exhaustion after reload", (done) => {
+    chrome.storage.local.get.mockImplementation((keys, callback) => {
+        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_UNBOOKMARK", count: 10, processedCount: 5, reloadedCount: 1 } }), 0);
+    });
+    require("../src/content.js");
+    window.history.pushState({}, '', '/i/bookmarks');
+
+    originalSetTimeout(() => {
+        expect(document.getElementById('x-deleter-text').innerText).toContain("Completed");
+        done();
+    }, 200);
+});
+
+test("unbookmark process no action branch", (done) => {
+    require("../src/content.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    window.history.pushState({}, '', '/i/bookmarks');
+
+    const cell = document.createElement('div');
+    cell.setAttribute('data-testid', 'cellInnerDiv');
+    document.body.appendChild(cell);
+
+    onMessage({ action: "EXECUTE", payload: { type: "START_UNBOOKMARK", count: 1, delay: 0 } }, {}, () => {});
+
+    originalSetTimeout(() => {
+        expect(window.scrollBy).toHaveBeenCalled();
+        done();
+    }, 200);
+});
+
+

@@ -6,6 +6,7 @@ beforeEach(() => {
             <button class="tab-btn active" data-tab="purge-view">Purge Tweets</button>
             <button class="tab-btn" data-tab="unfollow-view">Unfollow</button>
             <button class="tab-btn" data-tab="dislike-view">Dislike</button>
+            <button class="tab-btn" data-tab="bookmark-view">Unbookmark</button>
         </div>
         <div id="purge-view" class="tab-content active">
             <input type="checkbox" id="forever">
@@ -31,6 +32,13 @@ beforeEach(() => {
             <input type="number" id="dislikeDelay" value="2000">
             <select id="dislikeMode"><option value="foreground">foreground</option></select>
             <button id="startDislikeBtn">Start Disliking</button>
+        </div>
+        <div id="bookmark-view" class="tab-content">
+            <input type="checkbox" id="bookmarkForever">
+            <input type="number" id="bookmarkCount" value="10">
+            <input type="number" id="bookmarkDelay" value="2000">
+            <select id="bookmarkMode"><option value="foreground">foreground</option></select>
+            <button id="startBookmarkBtn">Start Unbookmarking</button>
         </div>
         <div id="status"></div>
     `;
@@ -187,5 +195,60 @@ test("clicking startDislikeBtn handles success response", () => {
     expect(window.close).toHaveBeenCalled();
     jest.useRealTimers();
 });
+
+test("clicking startBookmarkBtn handles success response", () => {
+    jest.useFakeTimers();
+    window.close = jest.fn();
+    require("../src/popup.js");
+    chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+        callback({ success: true });
+    });
+    document.getElementById('startBookmarkBtn').click();
+    expect(document.getElementById('status').innerText).toBe("Task Dispatched!");
+    jest.advanceTimersByTime(1000);
+    expect(window.close).toHaveBeenCalled();
+    jest.useRealTimers();
+});
+
+test("toggling bookmarkForever checkbox disables bookmarkCount input", () => {
+    require("../src/popup.js");
+    const forever = document.getElementById('bookmarkForever');
+    const count = document.getElementById('bookmarkCount');
+    
+    expect(count.disabled).toBe(false);
+    forever.checked = true;
+    forever.dispatchEvent(new Event('change'));
+    expect(count.disabled).toBe(true);
+});
+
+test("clicking startBookmarkBtn handles error response", () => {
+    require("../src/popup.js");
+    chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+        callback({ error: "Fail" });
+    });
+    document.getElementById('startBookmarkBtn').click();
+    expect(document.getElementById('status').innerText).toBe("Fail");
+    expect(document.getElementById('startBookmarkBtn').disabled).toBe(false);
+});
+
+test("clicking startBookmarkBtn with invalid count shows alert", () => {
+    window.alert = jest.fn();
+    require("../src/popup.js");
+    document.getElementById('bookmarkCount').value = "0";
+    document.getElementById('startBookmarkBtn').click();
+    expect(window.alert).toHaveBeenCalled();
+});
+
+test("clicking startDislikeBtn handles error response", () => {
+    require("../src/popup.js");
+    chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+        callback({ error: "Fail" });
+    });
+    document.getElementById('startDislikeBtn').click();
+    expect(document.getElementById('status').innerText).toBe("Fail");
+    expect(document.getElementById('startDislikeBtn').disabled).toBe(false);
+});
+
+
 
 

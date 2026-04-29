@@ -126,3 +126,14 @@ test("handles STOP_TASK without sender tab", () => {
     onMessage({ action: "STOP_TASK" }, {}, jest.fn());
 });
 
+test("handles START_UNBOOKMARK", () => {
+    require("../src/background.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    chrome.tabs.query.mockImplementation((queryInfo, callback) => {
+        callback([{ id: 101, url: "https://x.com/home" }]);
+    });
+    const sendResponse = jest.fn();
+    onMessage({ action: "START_UNBOOKMARK", payload: { mode: "foreground" } }, {}, sendResponse);
+    expect(chrome.scripting.executeScript).toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith({ success: true });
+});

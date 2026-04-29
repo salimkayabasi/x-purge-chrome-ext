@@ -162,3 +162,48 @@ document.getElementById('startDislikeBtn').addEventListener('click', () => {
     });
 });
 
+// Bookmark Logic
+document.getElementById('bookmarkForever').addEventListener('change', (e) => {
+    document.getElementById('bookmarkCount').disabled = e.target.checked;
+});
+
+document.getElementById('startBookmarkBtn').addEventListener('click', () => {
+    const count = parseInt(document.getElementById('bookmarkCount').value, 10);
+    const forever = document.getElementById('bookmarkForever').checked;
+    const delay = parseInt(document.getElementById('bookmarkDelay').value, 10) || 2000;
+    const mode = document.getElementById('bookmarkMode').value;
+
+    if (!forever && (!count || count < 1)) {
+        alert("Please enter a valid count.");
+        return;
+    }
+
+    const startBtn = document.getElementById('startBookmarkBtn');
+    startBtn.disabled = true;
+    startBtn.innerText = "Starting...";
+    
+    document.getElementById('status').innerText = "Connecting to background...";
+    document.getElementById('status').style.color = "#1d9bf0";
+
+    chrome.runtime.sendMessage({
+        action: "START_UNBOOKMARK",
+        payload: {
+            count,
+            forever,
+            delay,
+            mode
+        }
+    }, (response) => {
+        if (response && response.success) {
+            document.getElementById('status').innerText = "Task Dispatched!";
+            setTimeout(() => {
+                window.close();
+            }, 1000);
+        } else {
+            startBtn.disabled = false;
+            startBtn.innerText = "Start Unbookmarking";
+            document.getElementById('status').innerText = response?.error || "Failed to start.";
+            document.getElementById('status').style.color = "#f4212e";
+        }
+    });
+});
