@@ -1,40 +1,43 @@
 window.isXDeleterRunning = false;
 let myTabId = null;
+let overlayEl;
 
-if (typeof window.xDeleterInjected === 'undefined') {
-    window.xDeleterInjected = true;
+function initialize() {
+    if (typeof window.xDeleterInjected === 'undefined') {
+        window.xDeleterInjected = true;
 
-    // Get Tab ID and then check state
-    chrome.runtime.sendMessage({ action: "GET_TAB_ID" }, (response) => {
-        myTabId = response?.tabId;
-        
-        chrome.storage.local.get(['x_deleter_process'], (result) => {
-            if (result.x_deleter_process && result.x_deleter_process.running) {
-                syncWithStorage(result.x_deleter_process);
+        // Get Tab ID and then check state
+        chrome.runtime.sendMessage({ action: "GET_TAB_ID" }, (response) => {
+            myTabId = response?.tabId;
+            
+            chrome.storage.local.get(['x_deleter_process'], (result) => {
+                if (result.x_deleter_process && result.x_deleter_process.running) {
+                    syncWithStorage(result.x_deleter_process);
+                }
+            });
+        });
+
+        // Listen for storage changes to keep banner in sync across tabs
+        chrome.storage.onChanged.addListener((changes, area) => {
+            if (area === 'local' && changes.x_deleter_process) {
+                const newState = changes.x_deleter_process.newValue;
+                if (newState && newState.running) {
+                    syncWithStorage(newState);
+                } else {
+                    removeOverlay();
+                }
             }
         });
-    });
 
-    // Listen for storage changes to keep banner in sync across tabs
-    chrome.storage.onChanged.addListener((changes, area) => {
-        if (area === 'local' && changes.x_deleter_process) {
-            const newState = changes.x_deleter_process.newValue;
-            if (newState && newState.running) {
-                syncWithStorage(newState);
-            } else {
-                removeOverlay();
+        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+            if (message.action === "EXECUTE") {
+                const payload = { ...message.payload, masterTabId: myTabId, running: true, processedCount: 0 };
+                chrome.storage.local.set({ x_deleter_process: payload }, () => {
+                    syncWithStorage(payload);
+                });
             }
-        }
-    });
-
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        if (message.action === "EXECUTE") {
-            const payload = { ...message.payload, masterTabId: myTabId, running: true, processedCount: 0 };
-            chrome.storage.local.set({ x_deleter_process: payload }, () => {
-                syncWithStorage(payload);
-            });
-        }
-    });
+        });
+    }
 }
 
 function syncWithStorage(state) {
@@ -524,7 +527,6 @@ function waitForElement(selector, timeout = 10000) {
     });
 }
 
-let overlayEl;
 function injectOverlay(title, total, current) {
     current = current || 0;
     if (document.getElementById('x-deleter-overlay')) {
@@ -554,8 +556,14 @@ function injectOverlay(title, total, current) {
         clearState();
     };
     overlayEl.appendChild(stopBtn);
-    document.body.appendChild(overlayEl);
+    if (document.body) {
+        document.body.appendChild(overlayEl);
+    } else {
+        document.documentElement.appendChild(overlayEl);
+    }
 }
+
+initialize();
 
 function updateOverlayCount(current, total) {
     const textEl = document.getElementById('x-deleter-text');
