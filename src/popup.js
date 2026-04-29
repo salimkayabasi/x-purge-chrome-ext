@@ -1,3 +1,23 @@
+// Check for Active Task on Open
+chrome.storage.local.get(['x_deleter_process'], (result) => {
+    if (result.x_deleter_process && result.x_deleter_process.running) {
+        disableAllStartButtons("A task is already running...");
+        document.getElementById('status').innerText = "A task is currently active. Please stop it from the page banner if you wish to start a new one.";
+        document.getElementById('status').style.color = "#f4212e";
+    }
+});
+
+function disableAllStartButtons(text) {
+    const buttons = ['startPurgeBtn', 'startUnfollowBtn', 'startDislikeBtn', 'startBookmarkBtn'];
+    buttons.forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.disabled = true;
+            btn.innerText = text || btn.innerText;
+        }
+    });
+}
+
 // Tab Switching Logic
 document.querySelectorAll('.tab-btn').forEach(button => {
     button.addEventListener('click', () => {
@@ -11,8 +31,12 @@ document.querySelectorAll('.tab-btn').forEach(button => {
         document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
         document.getElementById(tabName).classList.add('active');
         
-        // Clear status
-        document.getElementById('status').innerText = "";
+        // Clear status if no active task
+        chrome.storage.local.get(['x_deleter_process'], (result) => {
+            if (!result.x_deleter_process || !result.x_deleter_process.running) {
+                document.getElementById('status').innerText = "";
+            }
+        });
     });
 });
 
@@ -56,6 +80,7 @@ document.getElementById('startPurgeBtn').addEventListener('click', () => {
     }, (response) => {
         if (response && response.success) {
             document.getElementById('status').innerText = "Task Dispatched!";
+            disableAllStartButtons("Running...");
             setTimeout(() => {
                 window.close();
             }, 1000);
@@ -104,6 +129,7 @@ document.getElementById('startUnfollowBtn').addEventListener('click', () => {
     }, (response) => {
         if (response && response.success) {
             document.getElementById('status').innerText = "Task Dispatched!";
+            disableAllStartButtons("Running...");
             setTimeout(() => {
                 window.close();
             }, 1000);
@@ -150,6 +176,7 @@ document.getElementById('startDislikeBtn').addEventListener('click', () => {
     }, (response) => {
         if (response && response.success) {
             document.getElementById('status').innerText = "Task Dispatched!";
+            disableAllStartButtons("Running...");
             setTimeout(() => {
                 window.close();
             }, 1000);
@@ -196,6 +223,7 @@ document.getElementById('startBookmarkBtn').addEventListener('click', () => {
     }, (response) => {
         if (response && response.success) {
             document.getElementById('status').innerText = "Task Dispatched!";
+            disableAllStartButtons("Running...");
             setTimeout(() => {
                 window.close();
             }, 1000);

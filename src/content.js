@@ -1,63 +1,75 @@
+let isProcessRunning = false;
+let myTabId = null;
+
 if (typeof window.xDeleterInjected === 'undefined') {
     window.xDeleterInjected = true;
 
-    // Check for resumed process on load
-    chrome.storage.local.get(['x_deleter_process'], (result) => {
-        if (result.x_deleter_process && result.x_deleter_process.running) {
-            const p = result.x_deleter_process;
-            if (p.type === "START_UNFOLLOW") {
-                startUnfollowProcess(p.count, p.forever, p.delay, p.includeBlock, p.processedCount, p.reloadedCount || 0);
-            } else if (p.type === "START_DISLIKE") {
-                startDislikeProcess(p.count, p.forever, p.delay, p.processedCount, p.reloadedCount || 0);
-            } else if (p.type === "START_UNBOOKMARK") {
-                startUnbookmarkProcess(p.count, p.forever, p.delay, p.processedCount, p.reloadedCount || 0);
+    // Get Tab ID and then check state
+    chrome.runtime.sendMessage({ action: "GET_TAB_ID" }, (response) => {
+        myTabId = response?.tabId;
+        
+        chrome.storage.local.get(['x_deleter_process'], (result) => {
+            if (result.x_deleter_process && result.x_deleter_process.running) {
+                syncWithStorage(result.x_deleter_process);
+            }
+        });
+    });
+
+    // Listen for storage changes to keep banner in sync across tabs
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes.x_deleter_process) {
+            const newState = changes.x_deleter_process.newValue;
+            if (newState && newState.running) {
+                syncWithStorage(newState);
             } else {
-                startPurgeProcess(
-                    p.count, p.direction, p.forever, p.delay, p.removeReposts, p.removeLikes,
-                    p.processedCount, p.reloadedCount || 0
-                );
+                removeOverlay();
             }
         }
     });
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === "EXECUTE") {
-            chrome.storage.local.remove(['x_deleter_process'], () => {
-                if (message.payload.type === "START_UNFOLLOW") {
-                    startUnfollowProcess(
-                        message.payload.count,
-                        message.payload.forever,
-                        message.payload.delay,
-                        message.payload.includeBlock
-                    );
-                } else if (message.payload.type === "START_DISLIKE") {
-                    startDislikeProcess(
-                        message.payload.count,
-                        message.payload.forever,
-                        message.payload.delay
-                    );
-                } else if (message.payload.type === "START_UNBOOKMARK") {
-                    startUnbookmarkProcess(
-                        message.payload.count,
-                        message.payload.forever,
-                        message.payload.delay
-                    );
-                } else {
-                    startPurgeProcess(
-                        message.payload.count,
-                        message.payload.direction,
-                        message.payload.forever,
-                        message.payload.delay,
-                        message.payload.removeReposts,
-                        message.payload.removeLikes
-                    );
-                }
+            const payload = { ...message.payload, masterTabId: myTabId };
+            chrome.storage.local.set({ x_deleter_process: { ...payload, running: true, processedCount: 0 } }, () => {
+                startProcess(payload);
             });
         }
     });
 }
 
-let isProcessRunning = false;
+function syncWithStorage(state) {
+    const titleMap = {
+        "START_PURGE": "Purging Tweets",
+        "START_UNFOLLOW": "Unfollowing Accounts",
+        "START_DISLIKE": "Removing Likes",
+        "START_UNBOOKMARK": "Removing Bookmarks"
+    };
+
+    const title = titleMap[state.type] || "Processing";
+    const total = state.forever ? "∞" : state.count;
+    
+    injectOverlay(title, total, state.processedCount);
+
+    // If this tab is the master, and not already running, start/resume it
+    if (state.masterTabId === myTabId && !isProcessRunning) {
+        startProcess(state);
+    }
+}
+
+function startProcess(p) {
+    if (p.type === "START_UNFOLLOW") {
+        startUnfollowProcess(p.count, p.forever, p.delay, p.includeBlock, p.processedCount, p.reloadedCount || 0);
+    } else if (p.type === "START_DISLIKE") {
+        startDislikeProcess(p.count, p.forever, p.delay, p.processedCount, p.reloadedCount || 0);
+    } else if (p.type === "START_UNBOOKMARK") {
+        startUnbookmarkProcess(p.count, p.forever, p.delay, p.processedCount, p.reloadedCount || 0);
+    } else {
+        startPurgeProcess(
+            p.count, p.direction, p.forever, p.delay, p.removeReposts, p.removeLikes,
+            p.processedCount, p.reloadedCount || 0
+        );
+    }
+}
 
 function clearState() {
     chrome.storage.local.remove(['x_deleter_process']);
@@ -68,27 +80,20 @@ function clearState() {
 async function startPurgeProcess(count, direction, forever, delay, removeReposts, removeLikes, initialProcessedCount, initialReloadedCount) {
     if (isProcessRunning) return;
     isProcessRunning = true;
-    initialProcessedCount = initialProcessedCount || 0;
-    initialReloadedCount = initialReloadedCount || 0;
-
-    const displayTotal = forever ? "∞" : count;
-    injectOverlay("Purging Tweets", displayTotal, initialProcessedCount);
-
-    let processedCount = initialProcessedCount;
+    let processedCount = initialProcessedCount || 0;
+    let reloadedCount = initialReloadedCount || 0;
     let fallbackScrolls = 0;
-    let reloadedCount = initialReloadedCount;
+    const displayTotal = forever ? "∞" : count;
 
     const saveState = () => {
         chrome.storage.local.set({
             x_deleter_process: {
-                running: true, type: "START_PURGE",
+                running: true, type: "START_PURGE", masterTabId: myTabId,
                 count, direction, forever, delay, removeReposts, removeLikes,
                 processedCount, reloadedCount
             }
         });
     };
-
-    saveState();
 
     const profileLink = await waitForElement('a[data-testid="AppTabBar_Profile_Link"]', 10000);
     if (!profileLink) {
@@ -190,8 +195,7 @@ async function startPurgeProcess(count, direction, forever, delay, removeReposts
         if (actionTaken) {
             processedCount++;
             saveState();
-            updateOverlayCount(processedCount, displayTotal);
-            // Small scroll to keep things moving
+            // updateOverlayCount(processedCount, displayTotal); // Handled by storage listener
             window.scrollBy(0, 150);
         } else {
             window.scrollBy(0, 400);
@@ -211,29 +215,21 @@ async function startPurgeProcess(count, direction, forever, delay, removeReposts
 async function startUnfollowProcess(count, forever, delay, includeBlock, initialProcessedCount, initialReloadedCount) {
     if (isProcessRunning) return;
     isProcessRunning = true;
-    initialProcessedCount = initialProcessedCount || 0;
-    initialReloadedCount = initialReloadedCount || 0;
-
-    const displayTotal = forever ? "∞" : count;
-    injectOverlay("Unfollowing Accounts", displayTotal, initialProcessedCount);
-
-    let processedCount = initialProcessedCount;
+    let processedCount = initialProcessedCount || 0;
+    let reloadedCount = initialReloadedCount || 0;
     let fallbackScrolls = 0;
-    let reloadedCount = initialReloadedCount;
+    const displayTotal = forever ? "∞" : count;
 
     const saveState = () => {
         chrome.storage.local.set({
             x_deleter_process: {
-                running: true, type: "START_UNFOLLOW",
+                running: true, type: "START_UNFOLLOW", masterTabId: myTabId,
                 count, forever, delay, includeBlock,
                 processedCount, reloadedCount
             }
         });
     };
 
-    saveState();
-
-    // Navigate to Following page
     const profileLink = await waitForElement('a[data-testid="AppTabBar_Profile_Link"]', 10000);
     if (!profileLink) {
         updateOverlay("Failed to find Profile Link.");
@@ -246,7 +242,7 @@ async function startUnfollowProcess(count, forever, delay, includeBlock, initial
 
     if (window.location.href.split('?')[0] !== followingUrl) {
         window.location.href = followingUrl;
-        return; // Page will reload, process will resume from storage
+        return; 
     }
 
     await waitForElement('[data-testid="UserCell"]', 10000);
@@ -277,7 +273,6 @@ async function startUnfollowProcess(count, forever, delay, includeBlock, initial
         let actionTaken = false;
         userContainer.setAttribute('data-x-processed', 'true');
 
-        // Try to Unfollow
         const unfollowBtn = userContainer.querySelector('[data-testid$="-unfollow"]');
         if (unfollowBtn) {
             unfollowBtn.click();
@@ -291,7 +286,6 @@ async function startUnfollowProcess(count, forever, delay, includeBlock, initial
             }
         }
 
-        // Try to Block if requested
         if (includeBlock) {
             const caret = userContainer.querySelector('[data-testid="caret"]');
             if (caret) {
@@ -318,18 +312,14 @@ async function startUnfollowProcess(count, forever, delay, includeBlock, initial
         if (actionTaken) {
             processedCount++;
             saveState();
-            updateOverlayCount(processedCount, displayTotal);
-            // Small scroll to keep things moving
             window.scrollBy(0, 150);
         } else {
-            // If no action taken, we still marked it as processed to skip it
             window.scrollBy(0, 300);
             continue;
         }
 
         await new Promise(r => setTimeout(r, delay));
     }
-
 
     if (forever || processedCount >= count) {
         updateOverlay(`Completed! Processed: ${processedCount}/${displayTotal}`);
@@ -340,29 +330,21 @@ async function startUnfollowProcess(count, forever, delay, includeBlock, initial
 async function startDislikeProcess(count, forever, delay, initialProcessedCount, initialReloadedCount) {
     if (isProcessRunning) return;
     isProcessRunning = true;
-    initialProcessedCount = initialProcessedCount || 0;
-    initialReloadedCount = initialReloadedCount || 0;
-
-    const displayTotal = forever ? "∞" : count;
-    injectOverlay("Removing Likes", displayTotal, initialProcessedCount);
-
-    let processedCount = initialProcessedCount;
+    let processedCount = initialProcessedCount || 0;
+    let reloadedCount = initialReloadedCount || 0;
     let fallbackScrolls = 0;
-    let reloadedCount = initialReloadedCount;
+    const displayTotal = forever ? "∞" : count;
 
     const saveState = () => {
         chrome.storage.local.set({
             x_deleter_process: {
-                running: true, type: "START_DISLIKE",
+                running: true, type: "START_DISLIKE", masterTabId: myTabId,
                 count, forever, delay,
                 processedCount, reloadedCount
             }
         });
     };
 
-    saveState();
-
-    // Navigate to Likes page
     const profileLink = await waitForElement('a[data-testid="AppTabBar_Profile_Link"]', 10000);
     if (!profileLink) {
         updateOverlay("Failed to find Profile Link.");
@@ -375,7 +357,7 @@ async function startDislikeProcess(count, forever, delay, initialProcessedCount,
 
     if (window.location.href.split('?')[0] !== likesUrl) {
         window.location.href = likesUrl;
-        return; // Page will reload, process will resume from storage
+        return; 
     }
 
     await waitForElement('[data-testid="cellInnerDiv"]', 10000);
@@ -421,8 +403,6 @@ async function startDislikeProcess(count, forever, delay, initialProcessedCount,
         if (actionTaken) {
             processedCount++;
             saveState();
-            updateOverlayCount(processedCount, displayTotal);
-            // Small scroll to keep things moving
             window.scrollBy(0, 150);
         } else {
             window.scrollBy(0, 400);
@@ -442,34 +422,25 @@ async function startDislikeProcess(count, forever, delay, initialProcessedCount,
 async function startUnbookmarkProcess(count, forever, delay, initialProcessedCount, initialReloadedCount) {
     if (isProcessRunning) return;
     isProcessRunning = true;
-    initialProcessedCount = initialProcessedCount || 0;
-    initialReloadedCount = initialReloadedCount || 0;
-
-    const displayTotal = forever ? "∞" : count;
-    injectOverlay("Removing Bookmarks", displayTotal, initialProcessedCount);
-
-    let processedCount = initialProcessedCount;
+    let processedCount = initialProcessedCount || 0;
+    let reloadedCount = initialReloadedCount || 0;
     let fallbackScrolls = 0;
-    let reloadedCount = initialReloadedCount;
+    const displayTotal = forever ? "∞" : count;
 
     const saveState = () => {
         chrome.storage.local.set({
             x_deleter_process: {
-                running: true, type: "START_UNBOOKMARK",
+                running: true, type: "START_UNBOOKMARK", masterTabId: myTabId,
                 count, forever, delay,
                 processedCount, reloadedCount
             }
         });
     };
 
-    saveState();
-
-    // Navigate to Bookmarks page
     const bookmarksUrl = "https://x.com/i/bookmarks";
-
     if (window.location.href.split('?')[0] !== bookmarksUrl) {
         window.location.href = bookmarksUrl;
-        return; // Page will reload, process will resume from storage
+        return; 
     }
 
     await waitForElement('[data-testid="cellInnerDiv"]', 10000);
@@ -520,8 +491,6 @@ async function startUnbookmarkProcess(count, forever, delay, initialProcessedCou
         if (actionTaken) {
             processedCount++;
             saveState();
-            updateOverlayCount(processedCount, displayTotal);
-            // Small scroll to keep things moving
             window.scrollBy(0, 150);
         } else {
             window.scrollBy(0, 400);
@@ -537,9 +506,6 @@ async function startUnbookmarkProcess(count, forever, delay, initialProcessedCou
         clearState();
     }
 }
-
-
-// ---------------- Helpers ----------------
 
 function waitForElement(selector, timeout = 10000) {
     return new Promise((resolve) => {
@@ -586,7 +552,6 @@ function injectOverlay(title, total, current) {
         stopBtn.disabled = true;
         stopBtn.innerText = "Stopping...";
         clearState();
-        updateOverlay("Process Stopped Manually");
     };
     overlayEl.appendChild(stopBtn);
     document.body.appendChild(overlayEl);
@@ -608,10 +573,18 @@ function updateOverlay(text) {
         if (text.includes("Completed") || text.includes("No more") || text.includes("Stopped")) {
             overlayEl.style.backgroundColor = '#00ba7c';
             if (stopBtn) stopBtn.remove();
+            setTimeout(removeOverlay, 5000);
         } else if (text.includes("Failed")) {
             overlayEl.style.backgroundColor = '#f4212e';
             if (stopBtn) stopBtn.remove();
+            setTimeout(removeOverlay, 10000);
         }
     }
+}
+
+function removeOverlay() {
+    const el = document.getElementById('x-deleter-overlay');
+    if (el) el.remove();
+    overlayEl = null;
 }
 
