@@ -15,6 +15,7 @@
     <div class="tabs">
       <button class="tab-btn active" data-tab="purge-view">Purge Tweets</button>
       <button class="tab-btn" data-tab="unfollow-view">Unfollow</button>
+      <button class="tab-btn" data-tab="dislike-view">Dislike</button>
     </div>
 
     <div id="purge-view" class="tab-content active">
@@ -83,6 +84,29 @@
         </select>
       </div>
       <button id="startUnfollowBtn" class="action-btn unfollow">Start Unfollowing</button>
+    </div>
+
+    <div id="dislike-view" class="tab-content">
+      <div class="form-group">
+        <label for="dislikeCount">Likes to Remove:</label>
+        <input type="number" id="dislikeCount" value="10" min="1">
+      </div>
+      <div class="form-group flex-row">
+        <input type="checkbox" id="dislikeForever" class="checkbox-input">
+        <label for="dislikeForever" class="checkbox-label">Forever (All)</label>
+      </div>
+      <div class="form-group">
+        <label for="dislikeDelay">Delay (ms):</label>
+        <input type="number" id="dislikeDelay" value="2000" min="500" step="500">
+      </div>
+      <div class="form-group">
+        <label for="dislikeMode">Mode:</label>
+        <select id="dislikeMode">
+          <option value="background">Background Tab</option>
+          <option value="foreground" selected>Foreground Tab</option>
+        </select>
+      </div>
+      <button id="startDislikeBtn" class="action-btn dislike">Start Disliking</button>
     </div>
 
     <div id="status"></div>

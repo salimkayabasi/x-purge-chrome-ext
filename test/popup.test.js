@@ -5,6 +5,7 @@ beforeEach(() => {
         <div class="tabs">
             <button class="tab-btn active" data-tab="purge-view">Purge Tweets</button>
             <button class="tab-btn" data-tab="unfollow-view">Unfollow</button>
+            <button class="tab-btn" data-tab="dislike-view">Dislike</button>
         </div>
         <div id="purge-view" class="tab-content active">
             <input type="checkbox" id="forever">
@@ -23,6 +24,13 @@ beforeEach(() => {
             <input type="checkbox" id="includeBlock">
             <select id="unfollowMode"><option value="foreground">foreground</option></select>
             <button id="startUnfollowBtn">Start Unfollowing</button>
+        </div>
+        <div id="dislike-view" class="tab-content">
+            <input type="checkbox" id="dislikeForever">
+            <input type="number" id="dislikeCount" value="10">
+            <input type="number" id="dislikeDelay" value="2000">
+            <select id="dislikeMode"><option value="foreground">foreground</option></select>
+            <button id="startDislikeBtn">Start Disliking</button>
         </div>
         <div id="status"></div>
     `;
@@ -164,6 +172,20 @@ test("tab switching works", () => {
     
     purgeBtn.click();
     expect(purgeBtn.classList.contains('active')).toBe(true);
+});
+
+test("clicking startDislikeBtn handles success response", () => {
+    jest.useFakeTimers();
+    window.close = jest.fn();
+    require("../src/popup.js");
+    chrome.runtime.sendMessage.mockImplementation((message, callback) => {
+        callback({ success: true });
+    });
+    document.getElementById('startDislikeBtn').click();
+    expect(document.getElementById('status').innerText).toBe("Task Dispatched!");
+    jest.advanceTimersByTime(1000);
+    expect(window.close).toHaveBeenCalled();
+    jest.useRealTimers();
 });
 
 

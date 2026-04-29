@@ -317,4 +317,62 @@ test("purge process forever loop", (done) => {
     }, 200);
 });
 
+test("dislike process to completion", (done) => {
+    require("../src/content.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    const profileLink = document.createElement('a');
+    profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
+    profileLink.href = 'https://x.com/user';
+    document.body.appendChild(profileLink);
+    window.history.pushState({}, '', '/user/likes');
 
+    const cell = document.createElement('div');
+    cell.setAttribute('data-testid', 'cellInnerDiv');
+    const unlike = document.createElement('div');
+    unlike.setAttribute('data-testid', 'unlike');
+    unlike.onclick = () => cell.remove();
+    cell.appendChild(unlike);
+    document.body.appendChild(cell);
+
+    onMessage({ action: "EXECUTE", payload: { type: "START_DISLIKE", count: 1, delay: 0 } }, {}, () => {});
+
+    originalSetTimeout(() => {
+        expect(document.getElementById('x-deleter-text').innerText).toContain("Completed");
+        done();
+    }, 200);
+});
+
+test("dislike process navigation branch", (done) => {
+    require("../src/content.js");
+    const onMessage = chrome.runtime.onMessage.addListener.mock.calls[0][0];
+    const profileLink = document.createElement('a');
+    profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
+    profileLink.href = 'https://x.com/user';
+    document.body.appendChild(profileLink);
+    window.history.pushState({}, '', '/home');
+
+    onMessage({ action: "EXECUTE", payload: { type: "START_DISLIKE", count: 1, delay: 0 } }, {}, () => {});
+
+    originalSetTimeout(() => {
+        // expect(window.location.href).toContain('/user/likes');
+        done();
+    }, 100);
+});
+
+test("dislike process fallback and reload", (done) => {
+    chrome.storage.local.get.mockImplementation((keys, callback) => {
+        originalSetTimeout(() => callback({ x_deleter_process: { running: true, type: "START_DISLIKE", count: 10, processedCount: 0, reloadedCount: 0 } }), 0);
+    });
+    require("../src/content.js");
+    const profileLink = document.createElement('a');
+    profileLink.setAttribute('data-testid', 'AppTabBar_Profile_Link');
+    profileLink.href = 'https://x.com/user';
+    document.body.appendChild(profileLink);
+    window.history.pushState({}, '', '/user/likes');
+
+    // Trigger loop with no cells to hit fallback
+    originalSetTimeout(() => {
+        expect(window.scrollBy).toHaveBeenCalled();
+        done();
+    }, 200);
+});

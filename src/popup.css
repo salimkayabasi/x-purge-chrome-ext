@@ -38,7 +38,7 @@ h2 {
   background: none;
   border: none;
   color: #71767b;
-  padding: 12px;
+  padding: 12px 6px;
   cursor: pointer;
   font-weight: 700;
   font-size: 14px;
@@ -134,6 +134,11 @@ input[type="number"]:focus, select:focus {
 
 .action-btn.unfollow {
   background-color: #1d9bf0;
+  color: #fff;
+}
+
+.action-btn.dislike {
+  background-color: #f91880;
   color: #fff;
 }
 

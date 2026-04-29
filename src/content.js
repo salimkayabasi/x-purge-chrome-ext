@@ -7,6 +7,8 @@ if (typeof window.xDeleterInjected === 'undefined') {
             const p = result.x_deleter_process;
             if (p.type === "START_UNFOLLOW") {
                 startUnfollowProcess(p.count, p.forever, p.delay, p.includeBlock, p.processedCount, p.reloadedCount || 0);
+            } else if (p.type === "START_DISLIKE") {
+                startDislikeProcess(p.count, p.forever, p.delay, p.processedCount, p.reloadedCount || 0);
             } else {
                 startPurgeProcess(
                     p.count, p.direction, p.forever, p.delay, p.removeReposts, p.removeLikes,
@@ -25,6 +27,12 @@ if (typeof window.xDeleterInjected === 'undefined') {
                         message.payload.forever,
                         message.payload.delay,
                         message.payload.includeBlock
+                    );
+                } else if (message.payload.type === "START_DISLIKE") {
+                    startDislikeProcess(
+                        message.payload.count,
+                        message.payload.forever,
+                        message.payload.delay
                     );
                 } else {
                     startPurgeProcess(
@@ -99,7 +107,7 @@ async function startPurgeProcess(count, direction, forever, delay, removeReposts
         });
 
         if (cells.length === 0) {
-            if (fallbackScrolls > 5) {
+            if (fallbackScrolls > 10) {
                 if (reloadedCount < 1) {
                     reloadedCount++;
                     saveState();
@@ -112,7 +120,7 @@ async function startPurgeProcess(count, direction, forever, delay, removeReposts
                 clearState();
                 break;
             }
-            window.scrollBy(0, 800);
+            window.scrollBy(0, 1000);
             fallbackScrolls++;
             await new Promise(r => setTimeout(r, 2000));
             continue;
@@ -175,8 +183,10 @@ async function startPurgeProcess(count, direction, forever, delay, removeReposts
             processedCount++;
             saveState();
             updateOverlayCount(processedCount, displayTotal);
+            // Small scroll to keep things moving
+            window.scrollBy(0, 150);
         } else {
-            window.scrollBy(0, 300);
+            window.scrollBy(0, 400);
             await new Promise(r => setTimeout(r, 1000));
             continue;
         }
@@ -243,12 +253,12 @@ async function startUnfollowProcess(count, forever, delay, includeBlock, initial
         });
 
         if (users.length === 0) {
-            if (fallbackScrolls > 5) {
+            if (fallbackScrolls > 10) {
                 updateOverlay(`Completed! Processed: ${processedCount}/${displayTotal}`);
                 clearState();
                 break;
             }
-            window.scrollBy(0, 800);
+            window.scrollBy(0, 1000);
             fallbackScrolls++;
             await new Promise(r => setTimeout(r, 2000));
             continue;
@@ -301,14 +311,119 @@ async function startUnfollowProcess(count, forever, delay, includeBlock, initial
             processedCount++;
             saveState();
             updateOverlayCount(processedCount, displayTotal);
+            // Small scroll to keep things moving
+            window.scrollBy(0, 150);
         } else {
             // If no action taken, we still marked it as processed to skip it
+            window.scrollBy(0, 300);
             continue;
         }
 
         await new Promise(r => setTimeout(r, delay));
     }
 
+
+    if (forever || processedCount >= count) {
+        updateOverlay(`Completed! Processed: ${processedCount}/${displayTotal}`);
+        clearState();
+    }
+}
+
+async function startDislikeProcess(count, forever, delay, initialProcessedCount, initialReloadedCount) {
+    if (isProcessRunning) return;
+    isProcessRunning = true;
+    initialProcessedCount = initialProcessedCount || 0;
+    initialReloadedCount = initialReloadedCount || 0;
+
+    const displayTotal = forever ? "∞" : count;
+    injectOverlay("Removing Likes", displayTotal, initialProcessedCount);
+
+    let processedCount = initialProcessedCount;
+    let fallbackScrolls = 0;
+    let reloadedCount = initialReloadedCount;
+
+    const saveState = () => {
+        chrome.storage.local.set({
+            x_deleter_process: {
+                running: true, type: "START_DISLIKE",
+                count, forever, delay,
+                processedCount, reloadedCount
+            }
+        });
+    };
+
+    saveState();
+
+    // Navigate to Likes page
+    const profileLink = await waitForElement('a[data-testid="AppTabBar_Profile_Link"]', 10000);
+    if (!profileLink) {
+        updateOverlay("Failed to find Profile Link.");
+        clearState();
+        return;
+    }
+
+    const username = new URL(profileLink.href).pathname.split('/')[1];
+    const likesUrl = `https://x.com/${username}/likes`;
+
+    if (window.location.href.split('?')[0] !== likesUrl) {
+        window.location.href = likesUrl;
+        return; // Page will reload, process will resume from storage
+    }
+
+    await waitForElement('[data-testid="cellInnerDiv"]', 10000);
+    await new Promise(r => setTimeout(r, 1000));
+
+    while (forever || processedCount < count) {
+        if (!isProcessRunning) break;
+
+        const cells = Array.from(document.querySelectorAll('[data-testid="cellInnerDiv"]')).filter(cell => {
+            return cell.querySelector('[data-testid="unlike"]');
+        });
+
+        if (cells.length === 0) {
+            if (fallbackScrolls > 10) {
+                if (reloadedCount < 1) {
+                    reloadedCount++;
+                    saveState();
+                    updateOverlay("No more likes found. Reloading...");
+                    await new Promise(r => setTimeout(r, 1500));
+                    location.reload();
+                    return;
+                }
+                updateOverlay(`Completed! Processed: ${processedCount}/${displayTotal}`);
+                clearState();
+                break;
+            }
+            window.scrollBy(0, 1000);
+            fallbackScrolls++;
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+        }
+
+        fallbackScrolls = 0;
+        let tweetContainer = cells[0];
+        let actionTaken = false;
+
+        let unlikeBtn = tweetContainer.querySelector('[data-testid="unlike"]');
+        if (unlikeBtn) {
+            unlikeBtn.click();
+            actionTaken = true;
+        }
+
+        if (actionTaken) {
+            processedCount++;
+            saveState();
+            updateOverlayCount(processedCount, displayTotal);
+            // Small scroll to keep things moving
+            window.scrollBy(0, 150);
+        } else {
+            window.scrollBy(0, 400);
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+        }
+
+        await new Promise(r => setTimeout(r, delay));
+    }
 
     if (forever || processedCount >= count) {
         updateOverlay(`Completed! Processed: ${processedCount}/${displayTotal}`);

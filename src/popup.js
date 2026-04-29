@@ -116,3 +116,49 @@ document.getElementById('startUnfollowBtn').addEventListener('click', () => {
     });
 });
 
+// Dislike Logic
+document.getElementById('dislikeForever').addEventListener('change', (e) => {
+    document.getElementById('dislikeCount').disabled = e.target.checked;
+});
+
+document.getElementById('startDislikeBtn').addEventListener('click', () => {
+    const count = parseInt(document.getElementById('dislikeCount').value, 10);
+    const forever = document.getElementById('dislikeForever').checked;
+    const delay = parseInt(document.getElementById('dislikeDelay').value, 10) || 2000;
+    const mode = document.getElementById('dislikeMode').value;
+
+    if (!forever && (!count || count < 1)) {
+        alert("Please enter a valid count.");
+        return;
+    }
+
+    const startBtn = document.getElementById('startDislikeBtn');
+    startBtn.disabled = true;
+    startBtn.innerText = "Starting...";
+    
+    document.getElementById('status').innerText = "Connecting to background...";
+    document.getElementById('status').style.color = "#1d9bf0";
+
+    chrome.runtime.sendMessage({
+        action: "START_DISLIKE",
+        payload: {
+            count,
+            forever,
+            delay,
+            mode
+        }
+    }, (response) => {
+        if (response && response.success) {
+            document.getElementById('status').innerText = "Task Dispatched!";
+            setTimeout(() => {
+                window.close();
+            }, 1000);
+        } else {
+            startBtn.disabled = false;
+            startBtn.innerText = "Start Disliking";
+            document.getElementById('status').innerText = response?.error || "Failed to start.";
+            document.getElementById('status').style.color = "#f4212e";
+        }
+    });
+});
+
